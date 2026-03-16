@@ -45,10 +45,10 @@ const ANALYTICS_SYSTEM = `Sei un esperto di social media analytics. Analizza i d
 {"sintesi":"<2-3 frasi su trend generale>","top_post":{"motivo":"<perche ha performato bene>"},"bottom_post":{"motivo":"<perche ha performato peggio>"},"consigli":["<consiglio 1>","<consiglio 2>","<consiglio 3>"],"best_giorno":"<giorno della settimana con piu engagement>","best_formato":"<formato che performa meglio>"}`;
 
 const MODES = [
-  { id: "brainstorm", label: "💡 Brainstorm",  desc: "Consulente creativo libero da schemi",    color: "#7B4FA0" },
-  { id: "caption",    label: "✍️ Caption",    desc: "Scrivi una caption per il tuo post",       color: "#E8354A" },
-  { id: "hashtag",    label: "# Hashtag",     desc: "Trova gli hashtag perfetti",               color: "#2BB5AE" },
-  { id: "reels",      label: "🎬 Video",       desc: "Assistente per la produzione video",       color: "#7B4FA0" },
+  { id: "brainstorm", label: "💡 Brainstorm",  desc: "Consulente creativo libero da schemi",    color: "#E8354A" },
+  { id: "caption",    label: "✍️ Caption",    desc: "Scrivi una caption per il tuo post",       color: "#2BB5AE" },
+  { id: "hashtag",    label: "# Hashtag",     desc: "Trova gli hashtag perfetti",               color: "#7B4FA0" },
+  { id: "reels",      label: "🎬 Video",       desc: "Assistente per la produzione video",       color: "#2BB5AE" },
   { id: "analytics",  label: "📈 Analytics",   desc: "Traccia e analizza i tuoi post",           color: "#E8354A" },
 ];
 const PLATFORMS   = ["Instagram", "Facebook", "Entrambi"];
@@ -719,7 +719,7 @@ export default function LenIA() {
       )}
 
       <div style={S.modeBar}>
-        {MODES.filter(m=>m.id!=="calendar").map(m => <button key={m.id} className="mode-btn" onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id?{ borderBottomColor:m.color, color:m.color, background:`${m.color}0D` }:{}) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
+        {MODES.filter(m=>m.id!=="calendar").map(m => <button key={m.id} className="mode-btn" onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id?{ background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }:{ color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
       </div>
 
       {mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : (
