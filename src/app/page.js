@@ -119,7 +119,9 @@ export default function LenIA() {
   const [calDraft, setCalDraft]           = useState({ title:"", platform:"Instagram", format:"Post", note:"" });
   const [editCalEvent, setEditCalEvent]   = useState(null);
 
-  // Cursor — uses refs + direct DOM manipulation to avoid re-renders
+  // Attachments (caption + brainstorm only)
+  const [attachment, setAttachment] = useState(null); // { base64, mediaType, name, preview }
+  const fileInputRef = useRef(null);
   const [isMobile, setIsMobile]   = useState(false);
   const isHoveringRef  = useRef(false);
   const cursorDotRef   = useRef(null);
@@ -248,14 +250,42 @@ export default function LenIA() {
     return "";
   };
 
+  const handleFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(",")[1];
+      const mediaType = file.type;
+      const preview = file.type.startsWith("image/") ? reader.result : null;
+      setAttachment({ base64, mediaType, name: file.name, preview });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
   const sendMessage = async () => {
-    if (!input.trim() || loading) return;
-    const userContent = getModePrompt() + input;
-    const userMsg = { role:"user", content:userContent, display:input, mode, platform };
-    const newHistory = [...history, { role:"user", content:userContent }];
+    if ((!input.trim() && !attachment) || loading) return;
+    const textPrompt = getModePrompt() + (input.trim() || (attachment ? `Analizza questo file: ${attachment.name}` : ""));
+
+    // Build message content — with or without attachment
+    let userApiContent;
+    if (attachment) {
+      const fileBlock = attachment.mediaType === "application/pdf"
+        ? { type:"document", source:{ type:"base64", media_type:"application/pdf", data:attachment.base64 } }
+        : { type:"image", source:{ type:"base64", media_type:attachment.mediaType, data:attachment.base64 } };
+      userApiContent = [fileBlock, { type:"text", text:textPrompt }];
+    } else {
+      userApiContent = textPrompt;
+    }
+
+    const displayText = input.trim() || `[${attachment.name}]`;
+    const userMsg = { role:"user", content:userApiContent, display:displayText, mode, platform, attachmentPreview: attachment?.preview, attachmentName: attachment?.name };
+    const newHistory = [...history, { role:"user", content:userApiContent }];
     setMessages(p => [...p, userMsg]);
     setHistory(newHistory);
     setInput("");
+    setAttachment(null);
     setLoading(true);
     try {
       const data = await callAI({ model:"claude-sonnet-4-20250514", max_tokens:1000, system:buildSystemPrompt(), messages:newHistory });
@@ -767,6 +797,8 @@ export default function LenIA() {
                     <div style={{ display:"flex", justifyContent:"flex-end" }}>
                       <div style={S.userBubble}>
                         <div style={{ display:"flex", gap:6, marginBottom:8 }}><span style={{ ...S.modeTag, background:msgMode?.color||"#999" }}>{msgMode?.label}</span><span style={S.platformTag}>{msg.platform}</span></div>
+                        {msg.attachmentPreview && <img src={msg.attachmentPreview} alt="allegato" style={{ maxWidth:"100%", borderRadius:8, marginBottom:8, maxHeight:160, objectFit:"cover" }} />}
+                        {msg.attachmentName && !msg.attachmentPreview && <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#7B4FA0", marginBottom:6 }}>📎 {msg.attachmentName}</div>}
                         <p style={{ fontSize:13, color:"#333", lineHeight:1.7, fontFamily:"'DM Sans',sans-serif" }}>{msg.display}</p>
                       </div>
                     </div>
@@ -829,9 +861,24 @@ export default function LenIA() {
             <div ref={bottomRef} />
           </div>
 
-          <div style={S.inputArea}>
+          <div style={{ ...S.inputArea, background:`${currentMode.color}10`, borderTop:`2px solid ${currentMode.color}33` }}>
+            {attachment && (
+              <div style={{ maxWidth:860, margin:"0 auto 10px", display:"flex", alignItems:"center", gap:10, background:"#fff", border:`1px solid ${currentMode.color}44`, borderRadius:10, padding:"8px 12px" }}>
+                {attachment.preview
+                  ? <img src={attachment.preview} alt="preview" style={{ width:40, height:40, borderRadius:6, objectFit:"cover" }} />
+                  : <span style={{ fontSize:22 }}>📎</span>}
+                <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"#555", flex:1 }}>{attachment.name}</span>
+                <button onClick={()=>setAttachment(null)} style={{ background:"transparent", border:"none", color:"#ccc", fontSize:16, cursor:"pointer" }}>✕</button>
+              </div>
+            )}
             <div style={S.inputWrapper}>
-              <textarea style={S.textarea} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={handleKey}
+              {(mode==="caption"||mode==="brainstorm") && (
+                <>
+                  <input ref={fileInputRef} type="file" accept="image/*,application/pdf" style={{ display:"none" }} onChange={handleFileSelect} />
+                  <button className="clear-btn" onClick={()=>fileInputRef.current?.click()} style={{ ...S.clearBtn, width:52, height:52, borderRadius:14, fontSize:20, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", padding:0, border:`1.5px solid ${currentMode.color}55`, color:currentMode.color }} {...hov} title="Allega immagine o PDF">+</button>
+                </>
+              )}
+              <textarea style={{ ...S.textarea, border:`1.5px solid ${currentMode.color}55`, boxShadow:`0 2px 12px ${currentMode.color}15` }} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={handleKey}
                 placeholder={
                   mode==="caption"    ? "es. foto del backstage dell'ultima performance, mood underground..." :
                   mode==="hashtag"    ? "es. mostra collettiva di arte digitale e musica sperimentale" :
@@ -840,7 +887,7 @@ export default function LenIA() {
                                         "Scrivi qui..."
                 }
                 rows={3} />
-              <button className="send-btn" onClick={sendMessage} disabled={!input.trim()||loading} style={{ ...S.sendBtn, background:!input.trim()||loading?"#e8e4df":currentMode.color, color:!input.trim()||loading?"#bbb":"#fff" }} {...hov}>↑</button>
+              <button className="send-btn" onClick={sendMessage} disabled={(!input.trim()&&!attachment)||loading} style={{ ...S.sendBtn, background:(!input.trim()&&!attachment)||loading?"#e8e4df":currentMode.color, color:(!input.trim()&&!attachment)||loading?"#bbb":"#fff" }} {...hov}>↑</button>
             </div>
             <p style={{ maxWidth:860, margin:"8px auto 0", fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#ccc", letterSpacing:"0.08em" }}>enter per inviare · shift+enter per andare a capo</p>
           </div>
@@ -921,7 +968,7 @@ const S = {
   platformBar: { display:"flex", alignItems:"center", gap:8, padding:"9px 28px", borderBottom:"1px solid rgba(0,0,0,0.05)", background:"rgba(250,250,248,0.9)", position:"relative", zIndex:10, overflowX:"auto" },
   platformBtn: { padding:"5px 18px", fontSize:12, fontWeight:500, border:"1.5px solid rgba(0,0,0,0.1)", background:"transparent", color:"#999", borderRadius:20, fontFamily:"'DM Sans',sans-serif", flexShrink:0 },
   ctxChip: { padding:"5px 14px", fontSize:11, fontWeight:500, border:"1.5px solid rgba(0,0,0,0.08)", background:"transparent", color:"#aaa", borderRadius:20, fontFamily:"'DM Sans',sans-serif", flexShrink:0, whiteSpace:"nowrap" },
-  chat: { flex:1, overflowY:"auto", padding:"36px 28px", maxWidth:900, width:"100%", margin:"0 auto", display:"flex", flexDirection:"column", gap:24, position:"relative", zIndex:5 },
+  chat: { flex:1, overflowY:"auto", padding:"36px 28px 120px", maxWidth:900, width:"100%", margin:"0 auto", display:"flex", flexDirection:"column", gap:24, position:"relative", zIndex:5 },
   emptyState: { display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14, padding:"60px 20px", textAlign:"center" },
   emptyTitle: { fontFamily:"'Playfair Display',serif", fontSize:32, fontWeight:900, color:"#1a1a1a", letterSpacing:"-0.02em" },
   chip: { fontFamily:"'DM Sans',sans-serif", fontSize:12, fontWeight:500, padding:"8px 18px", border:"1.5px solid rgba(232,53,74,0.3)", borderRadius:24, color:"#E8354A", background:"rgba(232,53,74,0.04)", display:"inline-flex", alignItems:"center" },
@@ -938,7 +985,7 @@ const S = {
   analysisSubLabel: { fontFamily:"'DM Sans',sans-serif", fontSize:10, fontWeight:700, color:"#aaa", letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:6 },
   analysisBullet: { fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"#555", lineHeight:1.7 },
   analysisOptimized: { fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#1a1a1a", lineHeight:1.85, whiteSpace:"pre-wrap", background:"#fff", border:"1px solid rgba(43,181,174,0.25)", borderRadius:10, padding:"14px 16px" },
-  inputArea: { borderTop:"1px solid rgba(0,0,0,0.07)", background:"rgba(250,250,248,0.97)", backdropFilter:"blur(20px)", padding:"18px 28px 22px", position:"relative", zIndex:10 },
+  inputArea: { borderTop:"1px solid rgba(0,0,0,0.07)", background:"rgba(250,250,248,0.97)", backdropFilter:"blur(20px)", padding:"18px 28px 22px", position:"sticky", bottom:0, zIndex:20 },
   inputWrapper: { maxWidth:900, margin:"0 auto", display:"flex", gap:12, alignItems:"flex-end" },
   textarea: { flex:1, background:"#fff", border:"1.5px solid rgba(0,0,0,0.1)", borderRadius:14, padding:"12px 18px", fontSize:13, fontFamily:"'DM Sans',sans-serif", color:"#1a1a1a", resize:"none", lineHeight:1.7, transition:"all 0.2s ease", boxShadow:"0 2px 8px rgba(0,0,0,0.04)" },
   sendBtn: { width:52, height:52, border:"none", borderRadius:14, fontSize:20, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, boxShadow:"0 4px 16px rgba(0,0,0,0.1)" },
