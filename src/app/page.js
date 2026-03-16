@@ -45,11 +45,11 @@ const ANALYTICS_SYSTEM = `Sei un esperto di social media analytics. Analizza i d
 {"sintesi":"<2-3 frasi su trend generale>","top_post":{"motivo":"<perche ha performato bene>"},"bottom_post":{"motivo":"<perche ha performato peggio>"},"consigli":["<consiglio 1>","<consiglio 2>","<consiglio 3>"],"best_giorno":"<giorno della settimana con piu engagement>","best_formato":"<formato che performa meglio>"}`;
 
 const MODES = [
-  { id: "brainstorm", label: "💡 Brainstorm",  desc: "Consulente creativo libero da schemi",    color: "#0EA5E9" },
+  { id: "brainstorm", label: "💡 Brainstorm",  desc: "Consulente creativo libero da schemi",    color: "#7B4FA0" },
   { id: "caption",    label: "✍️ Caption",    desc: "Scrivi una caption per il tuo post",       color: "#E8354A" },
   { id: "hashtag",    label: "# Hashtag",     desc: "Trova gli hashtag perfetti",               color: "#2BB5AE" },
-  { id: "reels",      label: "🎬 Video",       desc: "Assistente per la produzione video",       color: "#F07D2A" },
-  { id: "analytics",  label: "📈 Analytics",   desc: "Traccia e analizza i tuoi post",           color: "#16A34A" },
+  { id: "reels",      label: "🎬 Video",       desc: "Assistente per la produzione video",       color: "#7B4FA0" },
+  { id: "analytics",  label: "📈 Analytics",   desc: "Traccia e analizza i tuoi post",           color: "#E8354A" },
 ];
 const PLATFORMS   = ["Instagram", "Facebook", "Entrambi"];
 const TONE_OPTIONS = ["Ironico","Poetico","Diretto","Provocatorio","Caldo","Misterioso","Giocoso","Urgente"];
