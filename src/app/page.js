@@ -99,6 +99,11 @@ export default function LenIA() {
   const [showHistory, setShowHistory] = useState(false);
   const [savedItems, setSavedItems]   = useState([]);
 
+  // Brainstorm sessions
+  const [bSessions, setBSessions]         = useState([]); // list of saved sessions
+  const [bSessionId, setBSessionId]       = useState(null); // current session id
+  const [showBSessions, setShowBSessions] = useState(false);
+
   // Analysis
   const [analyzing, setAnalyzing] = useState(null);
   const [analyses, setAnalyses]   = useState({});
@@ -185,11 +190,12 @@ export default function LenIA() {
     setLoadingUser(true);
     setUserName(name);
 
-    const [briefData, savedData, postsData, calData] = await Promise.all([
+    const [briefData, savedData, postsData, calData, bSessionsData] = await Promise.all([
       dbGet("briefs", name),
       dbGet("saved_items", name),
       dbGet("analytics_posts", name),
       dbGet("calendar_events", name),
+      dbGet("brainstorm_sessions", name),
     ]);
 
     if (briefData?.length > 0) {
@@ -200,9 +206,57 @@ export default function LenIA() {
     if (savedData?.length > 0) setSavedItems(savedData.map(i => ({ id:i.id, content:i.content, mode:i.mode, platform:i.platform, savedAt: new Date(i.saved_at).toLocaleString("it-IT") })));
     if (postsData?.length > 0) setPosts(postsData.map(p => ({ ...p, id:p.id, date:p.post_date, reach:p.reach||0, impressions:p.impressions||0, likes:p.likes||0, comments:p.comments||0, saves:p.saves||0, shares:p.shares||0, followers_delta:p.followers_delta||0 })));
     if (calData?.length > 0) setCalEvents(calData.map(e => ({ ...e, date: e.event_date })));
+    if (bSessionsData?.length > 0) setBSessions(bSessionsData);
 
     setLoadingUser(false);
     setUserReady(true);
+  };
+
+  // ── BRAINSTORM SESSION FUNCTIONS ──
+  const saveBrainstormSession = async (msgs, hist) => {
+    if (msgs.length === 0) return;
+    const title = msgs[0]?.display?.slice(0, 60) || "Sessione senza titolo";
+    const record = {
+      user_name: userName,
+      title,
+      messages: JSON.stringify(msgs),
+      history: JSON.stringify(hist),
+      saved_at: new Date().toISOString(),
+    };
+    if (bSessionId) {
+      await dbPut("brainstorm_sessions", bSessionId, record);
+    } else {
+      const saved = await dbPost("brainstorm_sessions", record);
+      if (saved?.id) {
+        setBSessionId(saved.id);
+        setBSessions(p => [{ ...record, id: saved.id }, ...p.filter(s => s.id !== saved.id)]);
+      }
+    }
+  };
+
+  const loadBrainstormSession = (session) => {
+    try {
+      const msgs = JSON.parse(session.messages || "[]");
+      const hist = JSON.parse(session.history || "[]");
+      setMessages(msgs);
+      setHistory(hist);
+      setBSessionId(session.id);
+      setShowBSessions(false);
+      setMode("brainstorm");
+    } catch {}
+  };
+
+  const deleteBrainstormSession = async (id) => {
+    await dbDelete("brainstorm_sessions", id);
+    setBSessions(p => p.filter(s => s.id !== id));
+    if (bSessionId === id) { setBSessionId(null); }
+  };
+
+  const newBrainstormSession = () => {
+    setMessages([]);
+    setHistory([]);
+    setBSessionId(null);
+    setShowBSessions(false);
   };
 
   const currentMode = MODES.find(m => m.id === mode);
@@ -290,8 +344,15 @@ export default function LenIA() {
     try {
       const data = await callAI({ model:"claude-sonnet-4-20250514", max_tokens:1000, system:buildSystemPrompt(), messages:newHistory });
       const text = data.content?.map(b => b.text||"").join("") || "Errore.";
-      setMessages(p => [...p, { role:"assistant", content:text, mode, platform }]);
-      setHistory(p => [...p, { role:"assistant", content:text }]);
+      const newAssistantMsg = { role:"assistant", content:text, mode, platform };
+      const finalMessages = [...messages, userMsg, newAssistantMsg];
+      const finalHistory = [...newHistory, { role:"assistant", content:text }];
+      setMessages(p => [...p, newAssistantMsg]);
+      setHistory(finalHistory);
+      // Auto-save brainstorm session
+      if (mode === "brainstorm") {
+        saveBrainstormSession(finalMessages, finalHistory);
+      }
     } catch { setMessages(p => [...p, { role:"assistant", content:"⚠️ Errore di connessione. Riprova!" }]); }
     finally { setLoading(false); }
   };
@@ -705,6 +766,38 @@ export default function LenIA() {
         </div>
       )}
 
+      {showBSessions && (
+        <div style={S.drawerOverlay} onClick={()=>setShowBSessions(false)}>
+          <div style={S.drawer} onClick={e=>e.stopPropagation()}>
+            <div style={S.drawerHeader}>
+              <span style={S.drawerTitle}>💡 Sessioni Brainstorm</span>
+              <button className="clear-btn" style={{ ...S.clearBtn, fontSize:12 }} onClick={()=>setShowBSessions(false)} {...hov}>✕ chiudi</button>
+            </div>
+            <div style={{ padding:"12px 20px", borderBottom:"1px solid rgba(0,0,0,0.07)" }}>
+              <button className="brief-save-btn" onClick={newBrainstormSession} style={{ ...S.saveBtn, background:"linear-gradient(135deg,#E8354A,#7B4FA0)", width:"100%", textAlign:"center", padding:"10px" }} {...hov}>+ Nuova sessione</button>
+            </div>
+            {bSessions.length===0 ? (
+              <div style={S.drawerEmpty}><div style={{ fontSize:36, marginBottom:12 }}>💭</div><p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#bbb" }}>Nessuna sessione salvata ancora.</p><p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#ccc", marginTop:6 }}>Le sessioni vengono salvate automaticamente durante il brainstorming.</p></div>
+            ) : (
+              <div style={S.drawerList}>
+                {bSessions.map(s => (
+                  <div key={s.id} style={{ ...S.drawerItem, border:`1px solid ${bSessionId===s.id?"rgba(232,53,74,0.3)":"rgba(0,0,0,0.07)"}`, background:bSessionId===s.id?"rgba(232,53,74,0.03)":"#FAFAF8" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                      <div style={{ fontFamily:"'Playfair Display',serif", fontSize:13, fontWeight:700, color:"#1a1a1a", flex:1, marginRight:8 }}>{s.title}</div>
+                      <button className="copy-btn" style={{ ...S.copyBtn, color:"#E8354A", flexShrink:0 }} onClick={()=>deleteBrainstormSession(s.id)} {...hov}>✕</button>
+                    </div>
+                    <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#bbb" }}>{new Date(s.saved_at||s.created_at).toLocaleString("it-IT")}</div>
+                    <button className="copy-btn" style={{ ...S.copyBtn, color:"#E8354A", fontWeight:600 }} onClick={()=>loadBrainstormSession(s)} {...hov}>
+                      {bSessionId===s.id ? "✓ sessione attiva" : "→ riprendi"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <header style={S.header}>
         <div style={S.headerInner}>
           <div style={S.logo}>
@@ -715,6 +808,10 @@ export default function LenIA() {
             <button className="clear-btn" onClick={()=>setShowHistory(true)} style={{ ...S.clearBtn, borderColor:savedItems.length>0?"#7B4FA0":"rgba(0,0,0,0.12)", color:savedItems.length>0?"#7B4FA0":"#999", position:"relative" }} {...hov}>
               {savedItems.length>0 && <span style={{ position:"absolute", top:3, right:3, width:6, height:6, borderRadius:"50%", background:"#7B4FA0" }} />}
               💾 storico{savedItems.length>0?` (${savedItems.length})`:""}
+            </button>
+            <button className="clear-btn" onClick={()=>setShowBSessions(true)} style={{ ...S.clearBtn, borderColor:bSessions.length>0?"#E8354A":"rgba(0,0,0,0.12)", color:bSessions.length>0?"#E8354A":"#999", position:"relative" }} {...hov}>
+              {bSessions.length>0 && <span style={{ position:"absolute", top:3, right:3, width:6, height:6, borderRadius:"50%", background:"#E8354A" }} />}
+              💡 sessioni{bSessions.length>0?` (${bSessions.length})`:""}
             </button>
             <button className="clear-btn" onClick={()=>setShowBrief(b=>!b)} style={{ ...S.clearBtn, borderColor:hasBrief?"#E8354A":"rgba(0,0,0,0.12)", color:hasBrief?"#E8354A":"#999", position:"relative" }} {...hov}>
               {hasBrief && <span style={{ position:"absolute", top:3, right:3, width:6, height:6, borderRadius:"50%", background:"#E8354A" }} />}
