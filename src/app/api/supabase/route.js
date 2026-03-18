@@ -11,11 +11,13 @@ export async function GET(req) {
   const userName = searchParams.get("user");
   if (!table || !userName) return Response.json({ error: "Missing params" }, { status: 400 });
 
+  const timestampCol = table === "saved_items" ? "saved_at" : "created_at";
+
   const { data, error } = await supabase
     .from(table)
     .select("*")
     .eq("user_name", userName)
-    .order("created_at", { ascending: false });
+    .order(timestampCol, { ascending: false });
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json(data);
