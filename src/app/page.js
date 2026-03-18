@@ -368,10 +368,13 @@ export default function LenIA() {
   };
 
   const saveToHistory = async (msg, msgIndex) => {
-    if (savedItems.find(i => i.id === msgIndex)) return;
+    // Dedup basato sul contenuto, non sull'indice
+    if (savedItems.find(i => i.content === msg.content)) return;
     const record = { user_name:userName, content:msg.content, mode:msg.mode, platform:msg.platform };
     const saved = await dbPost("saved_items", record);
-    setSavedItems(prev => [{ id:saved.id||msgIndex, content:msg.content, mode:msg.mode, platform:msg.platform, savedAt:new Date().toLocaleString("it-IT") }, ...prev]);
+    if (saved?.id) {
+      setSavedItems(prev => [{ id:saved.id, content:msg.content, mode:msg.mode, platform:msg.platform, savedAt:new Date().toLocaleString("it-IT") }, ...prev]);
+    }
   };
 
   const removeSaved = async (id) => {
