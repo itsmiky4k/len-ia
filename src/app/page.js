@@ -125,7 +125,7 @@ export default function LenIA() {
   const [editCalEvent, setEditCalEvent]   = useState(null);
 
   // Attachments (caption + brainstorm only)
-  const [attachment, setAttachment] = useState(null); // { base64, mediaType, name, preview }
+  const [attachments, setAttachments] = useState([]); // array of { base64, mediaType, name, preview }
   const fileInputRef = useRef(null);
   const [isMobile, setIsMobile]   = useState(false);
   const isHoveringRef  = useRef(false);
@@ -304,59 +304,119 @@ export default function LenIA() {
     return "";
   };
 
-  const handleFileSelect = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result.split(",")[1];
-      const mediaType = file.type;
-      const preview = file.type.startsWith("image/") ? reader.result : null;
-      setAttachment({ base64, mediaType, name: file.name, preview });
+  const compressImage = (file) => new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const maxSize = 800;
+      let w = img.width, h = img.height;
+      if (w > maxSize || h > maxSize) {
+        if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+        else { w = Math.round(w * maxSize / h); h = maxSize; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      const compressed = canvas.toDataURL("image/jpeg", 0.75);
+      URL.revokeObjectURL(url);
+      resolve(compressed);
     };
-    reader.readAsDataURL(file);
+    img.src = url;
+  });
+
+  const handleFileSelect = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const SIZE_THRESHOLD = 1 * 1024 * 1024; // 1MB
+    const newAttachments = await Promise.all(files.map(async (file) => {
+      if (file.type.startsWith("image/")) {
+        if (file.size > SIZE_THRESHOLD) {
+          // Comprimi solo se supera 1MB
+          const compressed = await compressImage(file);
+          const base64 = compressed.split(",")[1];
+          return { base64, mediaType:"image/jpeg", name:file.name, preview:compressed };
+        } else {
+          // Immagine già leggera, usa direttamente
+          return await new Promise((res) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const dataUrl = reader.result;
+              res({ base64: dataUrl.split(",")[1], mediaType:file.type, name:file.name, preview:dataUrl });
+            };
+            reader.readAsDataURL(file);
+          });
+        }
+      } else {
+        return await new Promise((res) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = reader.result.split(",")[1];
+            res({ base64, mediaType:file.type, name:file.name, preview:null });
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+    }));
+    setAttachments(prev => [...prev, ...newAttachments]);
     e.target.value = "";
   };
 
-  const sendMessage = async () => {
-    if ((!input.trim() && !attachment) || loading) return;
-    const textPrompt = getModePrompt() + (input.trim() || (attachment ? `Analizza questo file: ${attachment.name}` : ""));
+  const sendMessage = async (retryHistory = null) => {
+    const isRetry = retryHistory !== null;
+    if (!isRetry && (!input.trim() && !attachments.length) || loading) return;
+    const textPrompt = isRetry ? "" : getModePrompt() + (input.trim() || (attachments.length ? `Analizza questi file: ${attachments.map(a=>a.name).join(", ")}` : ""));
 
-    // Build message content — with or without attachment
     let userApiContent;
-    if (attachment) {
-      const fileBlock = attachment.mediaType === "application/pdf"
-        ? { type:"document", source:{ type:"base64", media_type:"application/pdf", data:attachment.base64 } }
-        : { type:"image", source:{ type:"base64", media_type:attachment.mediaType, data:attachment.base64 } };
-      userApiContent = [fileBlock, { type:"text", text:textPrompt }];
-    } else {
-      userApiContent = textPrompt;
+    let userMsg;
+
+    if (!isRetry) {
+      if (attachments.length > 0) {
+        const fileBlocks = attachments.map(att =>
+          att.mediaType === "application/pdf"
+            ? { type:"document", source:{ type:"base64", media_type:"application/pdf", data:att.base64 } }
+            : { type:"image", source:{ type:"base64", media_type:att.mediaType, data:att.base64 } }
+        );
+        userApiContent = [...fileBlocks, { type:"text", text:textPrompt }];
+      } else {
+        userApiContent = textPrompt;
+      }
+      const displayText = input.trim() || attachments.map(a=>`[${a.name}]`).join(" ");
+      userMsg = { role:"user", content:userApiContent, display:displayText, mode, platform, attachmentPreviews:attachments.map(a=>a.preview).filter(Boolean), attachmentNames:attachments.filter(a=>!a.preview).map(a=>a.name) };
     }
 
-    const displayText = input.trim() || `[${attachment?.name}]`;
-    const userMsg = { role:"user", content:userApiContent, display:displayText, mode, platform, attachmentPreview: attachment?.preview, attachmentName: attachment?.name };
-    // Limita la history agli ultimi 10 messaggi per evitare contesti troppo grandi
-    const trimmedHistory = [...history, { role:"user", content:userApiContent }].slice(-10);
-    setMessages(p => [...p, userMsg]);
-    setHistory(trimmedHistory);
-    setInput("");
-    setAttachment(null);
+    const trimmedHistory = isRetry
+      ? retryHistory
+      : [...history, { role:"user", content:userApiContent }].slice(-10);
+
+    if (!isRetry) {
+      setMessages(p => [...p, userMsg]);
+      setHistory(trimmedHistory);
+      setInput("");
+      setAttachments([]);
+    }
     setLoading(true);
     try {
       const data = await callAI({ model:"claude-sonnet-4-20250514", max_tokens:1500, system:buildSystemPrompt(), messages:trimmedHistory });
       if (data.error) throw new Error(data.error.message || "API error");
       const text = data.content?.map(b => b.text||"").join("") || "Errore.";
       const newAssistantMsg = { role:"assistant", content:text, mode, platform };
-      const finalMessages = [...messages, userMsg, newAssistantMsg];
       const finalHistory = [...trimmedHistory, { role:"assistant", content:text }];
-      setMessages(p => [...p, newAssistantMsg]);
+      setMessages(p => {
+        const base = isRetry ? p.slice(0,-1) : p;
+        return [...base, newAssistantMsg];
+      });
       setHistory(finalHistory);
       if (mode === "brainstorm") {
+        const finalMessages = isRetry
+          ? [...messages.slice(0,-1), newAssistantMsg]
+          : [...messages, userMsg, newAssistantMsg];
         saveBrainstormSession(finalMessages, finalHistory);
       }
     } catch (err) {
       console.error("API error:", err);
-      setMessages(p => [...p, { role:"assistant", content:"⚠️ Errore di connessione. Riprova tra qualche secondo!" }]);
+      if (!isRetry) {
+        setMessages(p => [...p, { role:"assistant", content:"⚠️ Errore di connessione. Riprova tra qualche secondo!", isError:true, retryHistory:trimmedHistory }]);
+      }
     }
     finally { setLoading(false); }
   };
@@ -901,8 +961,15 @@ export default function LenIA() {
                     <div style={{ display:"flex", justifyContent:"flex-end" }}>
                       <div style={S.userBubble}>
                         <div style={{ display:"flex", gap:6, marginBottom:8 }}><span style={{ ...S.modeTag, background:msgMode?.color||"#999" }}>{msgMode?.label}</span><span style={S.platformTag}>{msg.platform}</span></div>
-                        {msg.attachmentPreview && <img src={msg.attachmentPreview} alt="allegato" style={{ maxWidth:"100%", borderRadius:8, marginBottom:8, maxHeight:160, objectFit:"cover" }} />}
-                        {msg.attachmentName && !msg.attachmentPreview && <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#7B4FA0", marginBottom:6 }}>📎 {msg.attachmentName}</div>}
+                        {msg.attachmentPreviews?.length > 0 && (
+                          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
+                            {msg.attachmentPreviews.map((p,pi) => <img key={pi} src={p} alt="allegato" style={{ width:60, height:60, borderRadius:6, objectFit:"cover" }} />)}
+                          </div>
+                        )}
+                        {msg.attachmentNames?.map((n,ni) => <div key={ni} style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#7B4FA0", marginBottom:4 }}>📎 {n}</div>)}
+                        {/* legacy single attachment support */}
+                        {msg.attachmentPreview && !msg.attachmentPreviews && <img src={msg.attachmentPreview} alt="allegato" style={{ maxWidth:"100%", borderRadius:8, marginBottom:8, maxHeight:160, objectFit:"cover" }} />}
+                        {msg.attachmentName && !msg.attachmentPreviews && <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#7B4FA0", marginBottom:6 }}>📎 {msg.attachmentName}</div>}
                         <p style={{ fontSize:13, color:"#333", lineHeight:1.7, fontFamily:"'DM Sans',sans-serif" }}>{msg.display}</p>
                       </div>
                     </div>
@@ -911,12 +978,16 @@ export default function LenIA() {
                       <div style={{ ...S.assistantAvatar, background:`linear-gradient(135deg,${msgMode?.color||"#E8354A"},${msgMode?.color||"#E8354A"}88)` }}>✦</div>
                       <div style={S.assistantContent}>
                         <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:12, fontStyle:"italic", color:"#bbb", letterSpacing:"0.05em" }}>LEN-IA</div>
-                        <pre style={S.assistantText}>{msg.content}</pre>
-                        <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
-                          <button className="copy-btn" style={S.copyBtn} onClick={()=>navigator.clipboard.writeText(msg.content)} {...hov}>⎘ copia →</button>
-                          <button className="copy-btn" style={{ ...S.copyBtn, color:isSaved?"#7B4FA0":"#ccc" }} onClick={()=>saveToHistory(msg,i)} {...hov}>{isSaved?"✓ salvato":"💾 salva"}</button>
-                          {(msg.mode==="caption"||msg.mode==="reels") && !analysis && <button className="copy-btn" style={{ ...S.copyBtn, color:"#2BB5AE" }} onClick={()=>analyzeCaption(i,msg.content)} disabled={analyzing===i} {...hov}>{analyzing===i?"⏳ analisi in corso…":"📊 analizza"}</button>}
-                        </div>
+                        <pre style={{ ...S.assistantText, borderColor: msg.isError?"rgba(232,53,74,0.3)":"rgba(0,0,0,0.07)" }}>{msg.content}</pre>
+                        {msg.isError ? (
+                          <button className="copy-btn" style={{ ...S.copyBtn, color:"#E8354A", fontWeight:600 }} onClick={()=>sendMessage(msg.retryHistory)} {...hov}>↺ riprova →</button>
+                        ) : (
+                          <div style={{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"center" }}>
+                            <button className="copy-btn" style={S.copyBtn} onClick={()=>navigator.clipboard.writeText(msg.content)} {...hov}>⎘ copia →</button>
+                            <button className="copy-btn" style={{ ...S.copyBtn, color:isSaved?"#7B4FA0":"#ccc" }} onClick={()=>saveToHistory(msg,i)} {...hov}>{isSaved?"✓ salvato":"💾 salva"}</button>
+                            {(msg.mode==="caption"||msg.mode==="reels") && !analysis && <button className="copy-btn" style={{ ...S.copyBtn, color:"#2BB5AE" }} onClick={()=>analyzeCaption(i,msg.content)} disabled={analyzing===i} {...hov}>{analyzing===i?"⏳ analisi in corso…":"📊 analizza"}</button>}
+                          </div>
+                        )}
                         {msg.mode==="brainstorm" && (
                           <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:4 }}>
                             <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#bbb", letterSpacing:"0.08em", textTransform:"uppercase", alignSelf:"center" }}>porta in →</span>
@@ -966,20 +1037,24 @@ export default function LenIA() {
           </div>
 
           <div style={{ ...S.inputArea, background:`${currentMode.color}10`, borderTop:`2px solid ${currentMode.color}33` }}>
-            {attachment && (
-              <div style={{ maxWidth:860, margin:"0 auto 10px", display:"flex", alignItems:"center", gap:10, background:"#fff", border:`1px solid ${currentMode.color}44`, borderRadius:10, padding:"8px 12px" }}>
-                {attachment.preview
-                  ? <img src={attachment.preview} alt="preview" style={{ width:40, height:40, borderRadius:6, objectFit:"cover" }} />
-                  : <span style={{ fontSize:22 }}>📎</span>}
-                <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"#555", flex:1 }}>{attachment.name}</span>
-                <button onClick={()=>setAttachment(null)} style={{ background:"transparent", border:"none", color:"#ccc", fontSize:16, cursor:"pointer" }}>✕</button>
+            {attachments.length > 0 && (
+              <div style={{ maxWidth:860, margin:"0 auto 10px", display:"flex", gap:8, flexWrap:"wrap" }}>
+                {attachments.map((att, ai) => (
+                  <div key={ai} style={{ display:"flex", alignItems:"center", gap:6, background:"#fff", border:`1px solid ${currentMode.color}44`, borderRadius:10, padding:"6px 10px" }}>
+                    {att.preview
+                      ? <img src={att.preview} alt="preview" style={{ width:32, height:32, borderRadius:4, objectFit:"cover" }} />
+                      : <span style={{ fontSize:16 }}>📎</span>}
+                    <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#555", maxWidth:100, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{att.name}</span>
+                    <button onClick={()=>setAttachments(p=>p.filter((_,j)=>j!==ai))} style={{ background:"transparent", border:"none", color:"#ccc", fontSize:14, cursor:"pointer", padding:0 }}>✕</button>
+                  </div>
+                ))}
               </div>
             )}
             <div style={S.inputWrapper}>
               {(mode==="caption"||mode==="brainstorm") && (
                 <>
-                  <input ref={fileInputRef} type="file" accept="image/*,application/pdf" style={{ display:"none" }} onChange={handleFileSelect} />
-                  <button className="clear-btn" onClick={()=>fileInputRef.current?.click()} style={{ ...S.clearBtn, width:52, height:52, borderRadius:14, fontSize:20, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", padding:0, border:`1.5px solid ${currentMode.color}55`, color:currentMode.color }} {...hov} title="Allega immagine o PDF">+</button>
+                  <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple style={{ display:"none" }} onChange={handleFileSelect} />
+                  <button className="clear-btn" onClick={()=>fileInputRef.current?.click()} style={{ ...S.clearBtn, width:52, height:52, borderRadius:14, fontSize:20, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", padding:0, border:`1.5px solid ${currentMode.color}55`, color:currentMode.color }} {...hov} title="Allega immagini o PDF">+</button>
                 </>
               )}
               <textarea style={{ ...S.textarea, border:`1.5px solid ${currentMode.color}55`, boxShadow:`0 2px 12px ${currentMode.color}15` }} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={handleKey}
@@ -991,7 +1066,7 @@ export default function LenIA() {
                                         "Scrivi qui..."
                 }
                 rows={3} />
-              <button className="send-btn" onClick={sendMessage} disabled={(!input.trim()&&!attachment)||loading} style={{ ...S.sendBtn, background:(!input.trim()&&!attachment)||loading?"#e8e4df":currentMode.color, color:(!input.trim()&&!attachment)||loading?"#bbb":"#fff" }} {...hov}>↑</button>
+              <button className="send-btn" onClick={()=>sendMessage()} disabled={(!input.trim()&&!attachments.length)||loading} style={{ ...S.sendBtn, background:(!input.trim()&&!attachments.length)||loading?"#e8e4df":currentMode.color, color:(!input.trim()&&!attachments.length)||loading?"#bbb":"#fff" }} {...hov}>↑</button>
             </div>
             <p style={{ maxWidth:860, margin:"8px auto 0", fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#ccc", letterSpacing:"0.08em" }}>enter per inviare · shift+enter per andare a capo</p>
           </div>
