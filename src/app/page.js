@@ -333,27 +333,31 @@ export default function LenIA() {
       userApiContent = textPrompt;
     }
 
-    const displayText = input.trim() || `[${attachment.name}]`;
+    const displayText = input.trim() || `[${attachment?.name}]`;
     const userMsg = { role:"user", content:userApiContent, display:displayText, mode, platform, attachmentPreview: attachment?.preview, attachmentName: attachment?.name };
-    const newHistory = [...history, { role:"user", content:userApiContent }];
+    // Limita la history agli ultimi 10 messaggi per evitare contesti troppo grandi
+    const trimmedHistory = [...history, { role:"user", content:userApiContent }].slice(-10);
     setMessages(p => [...p, userMsg]);
-    setHistory(newHistory);
+    setHistory(trimmedHistory);
     setInput("");
     setAttachment(null);
     setLoading(true);
     try {
-      const data = await callAI({ model:"claude-sonnet-4-20250514", max_tokens:1000, system:buildSystemPrompt(), messages:newHistory });
+      const data = await callAI({ model:"claude-sonnet-4-20250514", max_tokens:1500, system:buildSystemPrompt(), messages:trimmedHistory });
+      if (data.error) throw new Error(data.error.message || "API error");
       const text = data.content?.map(b => b.text||"").join("") || "Errore.";
       const newAssistantMsg = { role:"assistant", content:text, mode, platform };
       const finalMessages = [...messages, userMsg, newAssistantMsg];
-      const finalHistory = [...newHistory, { role:"assistant", content:text }];
+      const finalHistory = [...trimmedHistory, { role:"assistant", content:text }];
       setMessages(p => [...p, newAssistantMsg]);
       setHistory(finalHistory);
-      // Auto-save brainstorm session
       if (mode === "brainstorm") {
         saveBrainstormSession(finalMessages, finalHistory);
       }
-    } catch { setMessages(p => [...p, { role:"assistant", content:"⚠️ Errore di connessione. Riprova!" }]); }
+    } catch (err) {
+      console.error("API error:", err);
+      setMessages(p => [...p, { role:"assistant", content:"⚠️ Errore di connessione. Riprova tra qualche secondo!" }]);
+    }
     finally { setLoading(false); }
   };
 
