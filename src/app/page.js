@@ -183,6 +183,38 @@ export default function LenIA() {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [messages, loading]);
 
+  // Auto-login se il nome è salvato in localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("lenia_user");
+    if (saved) {
+      setUserInput(saved);
+      // Triggera il login automaticamente
+      const autoLogin = async () => {
+        setLoadingUser(true);
+        setUserName(saved);
+        const [briefData, savedData, postsData, calData, bSessionsData] = await Promise.all([
+          dbGet("briefs", saved),
+          dbGet("saved_items", saved),
+          dbGet("analytics_posts", saved),
+          dbGet("calendar_events", saved),
+          dbGet("brainstorm_sessions", saved),
+        ]);
+        if (briefData?.length > 0) {
+          const b = briefData[0];
+          setBrief({ tones: b.tones || [], keywords: b.keywords || "", examples: b.examples || "" });
+          setBriefId(b.id);
+        }
+        if (savedData?.length > 0) setSavedItems(savedData.map(i => ({ id:i.id, content:i.content, mode:i.mode, platform:i.platform, savedAt: new Date(i.saved_at).toLocaleString("it-IT") })));
+        if (postsData?.length > 0) setPosts(postsData.map(p => ({ ...p, id:p.id, date:p.post_date, reach:p.reach||0, impressions:p.impressions||0, likes:p.likes||0, comments:p.comments||0, saves:p.saves||0, shares:p.shares||0, followers_delta:p.followers_delta||0 })));
+        if (calData?.length > 0) setCalEvents(calData.map(e => ({ ...e, date: e.event_date })));
+        if (bSessionsData?.length > 0) setBSessions(bSessionsData);
+        setLoadingUser(false);
+        setUserReady(true);
+      };
+      autoLogin();
+    }
+  }, []);
+
   // Load data from Supabase when user logs in
   const loginUser = async () => {
     const name = userInput.trim();
@@ -208,6 +240,7 @@ export default function LenIA() {
     if (calData?.length > 0) setCalEvents(calData.map(e => ({ ...e, date: e.event_date })));
     if (bSessionsData?.length > 0) setBSessions(bSessionsData);
 
+    localStorage.setItem("lenia_user", name);
     setLoadingUser(false);
     setUserReady(true);
   };
