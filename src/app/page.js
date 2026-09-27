@@ -429,7 +429,7 @@ export default function LenIA() {
     }
     setLoading(true);
     try {
-      const data = await callAI({ model:"claude-sonnet-4-20250514", max_tokens:1500, system:buildSystemPrompt(), messages:trimmedHistory });
+      const data = await callAI({ model:"claude-sonnet-5", max_tokens:1500, system:buildSystemPrompt(), messages:trimmedHistory });
       if (data.error) throw new Error(data.error.message || "API error");
       const text = data.content?.map(b => b.text||"").join("") || "Errore.";
       const newAssistantMsg = { role:"assistant", content:text, mode, platform };
@@ -457,7 +457,7 @@ export default function LenIA() {
   const analyzeCaption = async (msgIndex, text) => {
     setAnalyzing(msgIndex);
     try {
-      const data = await callAI({ model:"claude-sonnet-4-20250514", max_tokens:1000, system:ANALYSIS_SYSTEM, messages:[{ role:"user", content:`Analizza questa caption:\n\n${text}` }] });
+      const data = await callAI({ model:"claude-sonnet-5", max_tokens:1000, system:ANALYSIS_SYSTEM, messages:[{ role:"user", content:`Analizza questa caption:\n\n${text}` }] });
       const raw = data.content?.map(b => b.text||"").join("") || "{}";
       setAnalyses(prev => ({ ...prev, [msgIndex]: JSON.parse(raw.replace(/```json|```/g,"").trim()) }));
     } catch { setAnalyses(prev => ({ ...prev, [msgIndex]:{ error:true } })); }
@@ -521,7 +521,7 @@ export default function LenIA() {
     setLoadingInsights(true);
     try {
       const summary = posts.map(p => `Data: ${p.date} | Piattaforma: ${p.platform} | Formato: ${p.format} | Reach: ${p.reach} | Impressioni: ${p.impressions} | Like: ${p.likes} | Commenti: ${p.comments} | Salvataggi: ${p.saves} | Condivisioni: ${p.shares} | Delta follower: ${p.followers_delta} | Hashtag: ${p.hashtags||"n/d"} | Caption: ${p.caption||"n/d"}`).join("\n");
-      const data = await callAI({ model:"claude-sonnet-4-20250514", max_tokens:1000, system:ANALYTICS_SYSTEM, messages:[{ role:"user", content:`Analizza questi dati di ${posts.length} post:\n\n${summary}` }] });
+      const data = await callAI({ model:"claude-sonnet-5", max_tokens:1000, system:ANALYTICS_SYSTEM, messages:[{ role:"user", content:`Analizza questi dati di ${posts.length} post:\n\n${summary}` }] });
       const raw = data.content?.map(b => b.text||"").join("") || "{}";
       setAiInsights(JSON.parse(raw.replace(/```json|```/g,"").trim()));
     } catch { setAiInsights({ error:true }); }
