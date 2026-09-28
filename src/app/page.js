@@ -1145,7 +1145,7 @@ export default function LenIA() {
         {MODES.filter(m=>m.id!=="calendar").map(m => <button key={m.id} className="mode-btn" onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id?{ background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }:{ color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
       </div>
 
-      {mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : mode==="live" ? <LiveSessionPanel /> : (
+      {mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : mode==="live" ? LiveSessionPanel() : (
         <>
           {mode !== "brainstorm" && (
             <div style={S.platformBar}>
