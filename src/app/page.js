@@ -374,7 +374,7 @@ export default function LenIA() {
       }
       while (merged.length && merged[0].role !== "user") merged.shift();
       const data = await callAI({ model:"claude-sonnet-5", max_tokens:1200, system:LIVE_SYSTEM, messages:merged });
-      const reply = data?.content?.[0]?.text || `⚠️ Errore API: ${data?.error?.message || JSON.stringify(data)}`;
+      const reply = (data?.content || []).filter(b => b.type === "text").map(b => b.text).join("\n") || `⚠️ Errore API: ${data?.error?.message || JSON.stringify(data)}`;
       await supabase.from("shared_messages").insert({ session_id: activeLive.id, sender_name: "LEN-IA", role: "assistant", content: reply });
     } catch (e) {
       console.error(e);
