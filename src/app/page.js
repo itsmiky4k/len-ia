@@ -1,6 +1,7 @@
 "use client";
 // LEN-IA v1.1 — fix cursor
 import { useState, useRef, useEffect } from "react";
+import { supabase } from "../lib/supabase";
 
 // ─── SYSTEM PROMPTS ──────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `Sei LEN-IA, la Social Media Manager AI del Collettivo LEN — un collettivo di artisti giovani, pop, freschi ed esplosivi. Il tuo tono è energico, diretto, creativo e mai noioso. Parli come una persona vera, non come un robot corporate.
@@ -44,12 +45,21 @@ Rispondi sempre in italiano.`;
 const ANALYTICS_SYSTEM = `Sei un esperto di social media analytics. Analizza i dati dei post forniti e rispondi SOLO con un JSON valido, senza markdown, senza backtick. Struttura:
 {"sintesi":"<2-3 frasi su trend generale>","top_post":{"motivo":"<perche ha performato bene>"},"bottom_post":{"motivo":"<perche ha performato peggio>"},"consigli":["<consiglio 1>","<consiglio 2>","<consiglio 3>"],"best_giorno":"<giorno della settimana con piu engagement>","best_formato":"<formato che performa meglio>"}`;
 
+const LIVE_SYSTEM = `Sei LEN-IA in modalità Sessione Live — partecipi a una conversazione di gruppo con più membri del Collettivo LEN contemporaneamente, in tempo reale (es. durante una riunione o una sessione di progettazione condivisa).
+
+Ogni messaggio è preceduto dal nome di chi lo scrive (es. "Marco: ..."), così puoi distinguere chi dice cosa e rivolgerti alle persone per nome quando serve.
+
+Il tuo ruolo è facilitare la discussione di gruppo: fai da assistente creativo condiviso, riassumi quando la conversazione si allarga, evidenzia punti di accordo o disaccordo tra i membri, e proponi sintesi o prossimi passi concreti quando la discussione lo richiede.
+
+Tono: collaborativo, diretto, mai robotico, coerente con lo spirito pop ed energico del collettivo. Rispondi sempre in italiano.`;
+
 const MODES = [
   { id: "brainstorm", label: "💡 Brainstorm",  desc: "Consulente creativo libero da schemi",    color: "#E8354A" },
   { id: "caption",    label: "✍️ Caption",    desc: "Scrivi una caption per il tuo post",       color: "#2BB5AE" },
   { id: "hashtag",    label: "# Hashtag",     desc: "Trova gli hashtag perfetti",               color: "#7B4FA0" },
   { id: "reels",      label: "🎬 Video",       desc: "Assistente per la produzione video",       color: "#2BB5AE" },
   { id: "analytics",  label: "📈 Analytics",   desc: "Traccia e analizza i tuoi post",           color: "#E8354A" },
+  { id: "live",       label: "📡 Live",        desc: "Sessione condivisa in tempo reale col team", color: "#0EA5E9" },
 ];
 const PLATFORMS   = ["Instagram", "Facebook", "Entrambi"];
 const TONE_OPTIONS = ["Ironico","Poetico","Diretto","Provocatorio","Caldo","Misterioso","Giocoso","Urgente"];
@@ -59,6 +69,7 @@ const CONTEXTUAL_CHIPS = {
   hashtag:    ["musica alternativa italiana","arte collettiva urbana","live performance","new release","arte digitale","collettivo underground"],
   reels:      ["teaser nuovo brano","day in the life artista","behind the scenes live","time-lapse studio session","annuncio sorpresa","making of artwork"],
   analytics:  [],
+  live:       [],
 };
 const EMPTY_POST = { date:"", platform:"Instagram", format:"Post", caption:"", reach:0, impressions:0, likes:0, comments:0, saves:0, shares:0, followers_delta:0, hashtags:"" };
 const FORMATS = ["Post","Reel","Story","Carosello"];
@@ -80,6 +91,17 @@ export default function LenIA() {
   const [userInput, setUserInput] = useState("");
   const [userReady, setUserReady] = useState(false);
   const [loadingUser, setLoadingUser] = useState(false);
+
+  // Dark mode
+  const [dark, setDark] = useState(false);
+
+  // Sessione Live (condivisa in tempo reale)
+  const [liveCode, setLiveCode]         = useState("");
+  const [activeLive, setActiveLive]     = useState(null);
+  const [liveMessages, setLiveMessages] = useState([]);
+  const [liveInput, setLiveInput]       = useState("");
+  const [liveLoading, setLiveLoading]   = useState(false);
+  const [liveOnline, setLiveOnline]     = useState([]);
 
   // Chat
   const [mode, setMode]         = useState("caption");
@@ -293,6 +315,105 @@ export default function LenIA() {
   };
 
   const currentMode = MODES.find(m => m.id === mode);
+  // ── DARK MODE: carica preferenza salvata e salvala a ogni cambio ──
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("len-ia-theme");
+      if (saved) setDark(saved === "dark");
+      else if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) setDark(true);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem("len-ia-theme", dark ? "dark" : "light"); } catch {}
+  }, [dark]);
+
+  // ── SESSIONE LIVE ──
+  const genLiveCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
+
+  const createLiveSession = async (title) => {
+    const code = genLiveCode();
+    const { data, error } = await supabase
+      .from("shared_sessions")
+      .insert({ code, title: title || "Sessione senza titolo", created_by: userName })
+      .select()
+      .single();
+    if (error) { alert("Errore creazione stanza: " + error.message); return; }
+    setActiveLive(data);
+  };
+
+  const joinLiveSession = async (codeInput) => {
+    const code = (codeInput || "").trim().toUpperCase();
+    if (!code) return;
+    const { data, error } = await supabase.from("shared_sessions").select("*").eq("code", code).single();
+    if (error || !data) { alert("Nessuna stanza trovata con questo codice."); return; }
+    setActiveLive(data);
+  };
+
+  const leaveLiveSession = () => { setActiveLive(null); setLiveMessages([]); setLiveOnline([]); };
+
+  // Chi scrive è anche l'unico a chiamare l'AI: gli altri vedono tutto arrivare via realtime,
+  // così l'AI non risponde mai due volte allo stesso messaggio.
+  const sendLiveMessage = async () => {
+    if (!liveInput.trim() || !activeLive || liveLoading) return;
+    const text = liveInput.trim();
+    setLiveInput("");
+    setLiveLoading(true);
+    try {
+      await supabase.from("shared_messages").insert({ session_id: activeLive.id, sender_name: userName, role: "user", content: text });
+      const trimmedHistory = liveMessages.slice(-20).map(m => ({
+        role: m.role,
+        content: m.role === "user" ? `${m.sender_name}: ${m.content}` : m.content,
+      }));
+      // l'API richiede che la history inizi con un messaggio "user" e alterni i ruoli
+      const msgs = [...trimmedHistory, { role: "user", content: `${userName}: ${text}` }];
+      const merged = [];
+      for (const m of msgs) {
+        const last = merged[merged.length - 1];
+        if (last && last.role === m.role) last.content += "\n" + m.content;
+        else merged.push({ ...m });
+      }
+      while (merged.length && merged[0].role !== "user") merged.shift();
+      const data = await callAI({ model:"claude-sonnet-5", max_tokens:1200, system:LIVE_SYSTEM, messages:merged });
+      const reply = data?.content?.[0]?.text || "⚠️ Errore nella risposta di LEN-IA.";
+      await supabase.from("shared_messages").insert({ session_id: activeLive.id, sender_name: "LEN-IA", role: "assistant", content: reply });
+    } catch (e) {
+      console.error(e);
+    }
+    setLiveLoading(false);
+  };
+
+  // Sottoscrizione realtime + presence
+  useEffect(() => {
+    if (!activeLive) return;
+    let cancelled = false;
+
+    supabase.from("shared_messages").select("*").eq("session_id", activeLive.id)
+      .order("created_at", { ascending: true })
+      .then(({ data }) => { if (!cancelled) setLiveMessages(prev => {
+        const ids = new Set((data || []).map(m => m.id));
+        return [...(data || []), ...prev.filter(m => !ids.has(m.id))];
+      }); });
+
+    const channel = supabase
+      .channel(`live-session-${activeLive.id}`)
+      .on("postgres_changes",
+        { event: "INSERT", schema: "public", table: "shared_messages", filter: `session_id=eq.${activeLive.id}` },
+        (payload) => setLiveMessages(prev => prev.some(m => m.id === payload.new.id) ? prev : [...prev, payload.new]))
+      .on("presence", { event: "sync" }, () => {
+        const state = channel.presenceState();
+        setLiveOnline([...new Set(Object.values(state).flat().map(p => p.user_name))]);
+      })
+      .subscribe(async (status) => {
+        if (status === "SUBSCRIBED") await channel.track({ user_name: userName, online_at: new Date().toISOString() });
+      });
+
+    return () => { cancelled = true; supabase.removeChannel(channel); };
+  }, [activeLive?.id]);
+
+  // scroll automatico in fondo alla chat live
+  const liveBottomRef = useRef(null);
+  useEffect(() => { liveBottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [liveMessages, liveLoading]);
+
   const hov = {
     onMouseEnter: () => {
       isHoveringRef.current = true;
@@ -536,7 +657,7 @@ export default function LenIA() {
   // ── HELPERS ──
   const ScoreBar = ({ score }) => (
     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-      <div style={{ flex:1, height:6, background:"#f0ede8", borderRadius:3, overflow:"hidden" }}>
+      <div style={{ flex:1, height:6, background:"var(--track)", borderRadius:3, overflow:"hidden" }}>
         <div style={{ height:"100%", borderRadius:3, width:`${score*10}%`, background:score>=8?"#2BB5AE":score>=5?"#F07D2A":"#E8354A", transition:"width 1s cubic-bezier(0.22,1,0.36,1)" }} />
       </div>
       <span style={{ fontFamily:"'Playfair Display',serif", fontSize:22, fontWeight:900, color:score>=8?"#2BB5AE":score>=5?"#F07D2A":"#E8354A", minWidth:28 }}>{score}</span>
@@ -544,7 +665,7 @@ export default function LenIA() {
     </div>
   );
   const StatCard = ({ label, value, color }) => (
-    <div style={{ background:"#fff", border:"1px solid rgba(0,0,0,0.07)", borderRadius:12, padding:"14px 18px", display:"flex", flexDirection:"column", gap:4, boxShadow:"0 2px 8px rgba(0,0,0,0.04)" }}>
+    <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:12, padding:"14px 18px", display:"flex", flexDirection:"column", gap:4, boxShadow:"0 2px 8px rgba(0,0,0,0.04)" }}>
       <div style={{ fontSize:10, color:"#aaa", fontFamily:"'DM Sans',sans-serif", letterSpacing:"0.1em", textTransform:"uppercase", fontWeight:600 }}>{label}</div>
       <div style={{ fontFamily:"'Playfair Display',serif", fontSize:26, fontWeight:900, color:color||"#1a1a1a" }}>{Number(value).toLocaleString("it-IT")}</div>
     </div>
@@ -559,7 +680,7 @@ export default function LenIA() {
   // ── LOGIN SCREEN ──
   if (!userReady) {
     return (
-      <div style={{ ...S.root, alignItems:"center", justifyContent:"center" }}>
+      <div data-theme={dark?"dark":"light"} style={{ ...S.root, alignItems:"center", justifyContent:"center" }}>
         <style>{css}</style>
         {!isMobile && <>
           <div ref={cursorRingRef} style={{ position:"fixed", left:-100, top:-100, width:18, height:18, borderRadius:"50%", background:"#E8354A", transform:"translate(-50%,-50%)", pointerEvents:"none", zIndex:99999, transition:"width 0.2s,height 0.2s,background 0.2s,border 0.2s", mixBlendMode:"multiply" }} />
@@ -617,6 +738,80 @@ export default function LenIA() {
   const platformColor = (p) => p==="Instagram"?"#E8354A":p==="Facebook"?"#1877F2":"#7B4FA0";
 
   // ── CALENDAR PANEL ──
+  const LiveSessionPanel = () => {
+    if (!activeLive) {
+      return (
+        <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"40px 20px", gap:20, position:"relative", zIndex:5 }}>
+          <div style={{ fontSize:42 }}>📡</div>
+          <div style={{ fontFamily:"'Playfair Display',serif", fontSize:22, fontWeight:900 }}>Sessione Live</div>
+          <p style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:15, fontStyle:"italic", color:"#aaa", textAlign:"center", maxWidth:360 }}>
+            Crea una stanza condivisa o unisciti con un codice: tutto il team vede la stessa conversazione con LEN-IA in tempo reale.
+          </p>
+          <div style={{ display:"flex", flexDirection:"column", gap:10, width:"100%", maxWidth:320 }}>
+            <button className="brief-save-btn" style={{ ...S.saveBtn, background:"linear-gradient(135deg,#0EA5E9,#2BB5AE)", textAlign:"center", padding:"12px" }}
+              onClick={() => createLiveSession(window.prompt("Titolo della sessione (opzionale):") || "")} {...hov}>
+              + Crea nuova stanza
+            </button>
+            <div style={{ display:"flex", gap:8 }}>
+              <input style={{ ...S.briefInput, padding:"10px 12px", flex:1, textTransform:"uppercase" }} placeholder="Codice stanza (es. AB12CD)"
+                value={liveCode} onChange={e => setLiveCode(e.target.value)} onKeyDown={e => { if (e.key === "Enter") joinLiveSession(liveCode); }} />
+              <button className="clear-btn" style={S.clearBtn} onClick={() => joinLiveSession(liveCode)} {...hov}>Entra →</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div style={{ flex:1, display:"flex", flexDirection:"column", position:"relative", zIndex:5, minHeight:0 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 28px", borderBottom:"1px solid var(--border)" }}>
+          <div>
+            <div style={{ fontFamily:"'Playfair Display',serif", fontSize:15, fontWeight:700 }}>{activeLive.title}</div>
+            <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#aaa" }}>
+              codice: <b>{activeLive.code}</b> · {liveOnline.length} onlin{liveOnline.length===1?"e":"i"}{liveOnline.length>0 ? ` (${liveOnline.join(", ")})` : ""}
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <button className="copy-btn" style={S.copyBtn} onClick={() => navigator.clipboard.writeText(activeLive.code)} {...hov}>⎘ copia codice</button>
+            <button className="clear-btn" style={{ ...S.clearBtn, color:"#E8354A" }} onClick={leaveLiveSession} {...hov}>esci</button>
+          </div>
+        </div>
+        <div style={{ ...S.chat, paddingBottom:24 }}>
+          {liveMessages.length === 0 && <div style={{ textAlign:"center", color:"#aaa", fontFamily:"'Cormorant Garamond',serif", fontStyle:"italic", fontSize:15 }}>La stanza è vuota: scrivi il primo messaggio o condividi il codice <b>{activeLive.code}</b> col team.</div>}
+          {liveMessages.map((m, i) => (
+            <div key={m.id || i} style={{ ...S.msgWrapper, animation:"slideUp 0.35s cubic-bezier(0.22,1,0.36,1)" }}>
+              {m.role === "user" ? (
+                <div style={{ display:"flex", justifyContent: m.sender_name === userName ? "flex-end" : "flex-start" }}>
+                  <div style={S.userBubble}>
+                    <div style={{ fontSize:10, fontWeight:700, color:"#0EA5E9", marginBottom:4 }}>{m.sender_name}</div>
+                    <p style={{ fontSize:13, color:"var(--text2)", lineHeight:1.7, fontFamily:"'DM Sans',sans-serif" }}>{m.content}</p>
+                  </div>
+                </div>
+              ) : (
+                <div style={S.assistantRow}>
+                  <div style={{ ...S.assistantAvatar, background:"linear-gradient(135deg,#0EA5E9,#0EA5E988)" }}>✦</div>
+                  <div style={S.assistantContent}>
+                    <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:12, fontStyle:"italic", color:"#bbb", letterSpacing:"0.05em" }}>LEN-IA</div>
+                    <pre style={S.assistantText}>{m.content}</pre>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {liveLoading && <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"#aaa" }}>✦ LEN-IA sta scrivendo…</div>}
+          <div ref={liveBottomRef} />
+        </div>
+        <div style={S.inputArea}>
+          <div style={S.inputWrapper}>
+            <textarea style={S.textarea} rows={1} placeholder="Scrivi al gruppo…" value={liveInput}
+              onChange={e => setLiveInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendLiveMessage(); } }} />
+            <button className="send-btn" style={{ ...S.sendBtn, background:"linear-gradient(135deg,#0EA5E9,#2BB5AE)", color:"#fff" }} disabled={liveLoading || !liveInput.trim()} onClick={sendLiveMessage} {...hov}>→</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const CalendarPanel = () => {
     const daysInMonth = getDaysInMonth(calYear, calMonth);
     const firstDay    = getFirstDayOfMonth(calYear, calMonth);
@@ -672,7 +867,7 @@ export default function LenIA() {
             const sel = selectedDay===day;
             return (
               <div key={day} onClick={()=>{ setSelectedDay(sel?null:day); setEditCalEvent(null); }}
-                style={{ minHeight:72, background: sel?"rgba(123,79,160,0.08)":isToday(day)?"rgba(232,53,74,0.04)":"#fff", border:`1.5px solid ${sel?"#7B4FA0":isToday(day)?"rgba(232,53,74,0.3)":"rgba(0,0,0,0.07)"}`, borderRadius:10, padding:"6px 7px", cursor:"pointer", position:"relative" }}>
+                style={{ minHeight:72, background: sel?"rgba(123,79,160,0.08)":isToday(day)?"rgba(232,53,74,0.04)":"#fff", border:`1.5px solid ${sel?"#7B4FA0":isToday(day)?"rgba(232,53,74,0.3)":"var(--border)"}`, borderRadius:10, padding:"6px 7px", cursor:"pointer", position:"relative" }}>
                 <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight: isToday(day)?700:500, color: isToday(day)?"#E8354A":"#555", marginBottom:4 }}>{day}</div>
                 <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
                   {evs.slice(0,3).map((ev,ei) => (
@@ -690,7 +885,7 @@ export default function LenIA() {
 
         {/* Quick add form — uncontrolled inputs to avoid re-render flickering */}
         {selectedDay && (
-          <div style={{ marginTop:16, background:"#fff", border:"1.5px solid rgba(123,79,160,0.25)", borderRadius:14, padding:"18px 22px", animation:"slideUp 0.25s cubic-bezier(0.22,1,0.36,1)" }}>
+          <div style={{ marginTop:16, background:"var(--surface)", border:"1.5px solid rgba(123,79,160,0.25)", borderRadius:14, padding:"18px 22px", animation:"slideUp 0.25s cubic-bezier(0.22,1,0.36,1)" }}>
             <div style={{ fontFamily:"'Playfair Display',serif", fontSize:14, fontWeight:700, color:"#7B4FA0", marginBottom:14 }}>
               + Post per il {selectedDay} {MONTHS_IT[calMonth]}
             </div>
@@ -751,23 +946,23 @@ export default function LenIA() {
       </div>
       {posts.length>0 && <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:20 }}><StatCard label="Post tracciati" value={posts.length} color="#16A34A" /><StatCard label="Reach totale" value={totalReach} color="#2BB5AE" /><StatCard label="Like totali" value={totalLikes} color="#E8354A" /><StatCard label="Eng. medio/post" value={avgEng} color="#7B4FA0" /></div>}
       {aiInsights && !aiInsights.error && (
-        <div style={{ background:"#fff", border:"1.5px solid rgba(22,163,74,0.25)", borderRadius:14, padding:"20px 24px", marginBottom:20, animation:"slideUp 0.4s cubic-bezier(0.22,1,0.36,1)" }}>
+        <div style={{ background:"var(--surface)", border:"1.5px solid rgba(22,163,74,0.25)", borderRadius:14, padding:"20px 24px", marginBottom:20, animation:"slideUp 0.4s cubic-bezier(0.22,1,0.36,1)" }}>
           <div style={{ fontFamily:"'Playfair Display',serif", fontSize:15, fontWeight:700, color:"#16A34A", marginBottom:12 }}>✦ Analisi LEN-IA</div>
-          <p style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:15, fontStyle:"italic", color:"#555", lineHeight:1.7, marginBottom:14 }}>{aiInsights.sintesi}</p>
+          <p style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:15, fontStyle:"italic", color:"var(--text2)", lineHeight:1.7, marginBottom:14 }}>{aiInsights.sintesi}</p>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:14 }}>
-            <div style={{ background:"rgba(43,181,174,0.06)", borderRadius:10, padding:"12px 14px" }}><div style={S.analysisSubLabel}>🏆 Top post</div><div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"#555", lineHeight:1.6 }}>{aiInsights.top_post?.motivo}</div></div>
-            <div style={{ background:"rgba(232,53,74,0.06)", borderRadius:10, padding:"12px 14px" }}><div style={S.analysisSubLabel}>📉 Post debole</div><div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"#555", lineHeight:1.6 }}>{aiInsights.bottom_post?.motivo}</div></div>
+            <div style={{ background:"rgba(43,181,174,0.06)", borderRadius:10, padding:"12px 14px" }}><div style={S.analysisSubLabel}>🏆 Top post</div><div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"var(--text2)", lineHeight:1.6 }}>{aiInsights.top_post?.motivo}</div></div>
+            <div style={{ background:"rgba(232,53,74,0.06)", borderRadius:10, padding:"12px 14px" }}><div style={S.analysisSubLabel}>📉 Post debole</div><div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"var(--text2)", lineHeight:1.6 }}>{aiInsights.bottom_post?.motivo}</div></div>
           </div>
           <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
             {aiInsights.best_giorno && <span style={{ background:"rgba(22,163,74,0.08)", border:"1px solid rgba(22,163,74,0.2)", borderRadius:20, padding:"4px 14px", fontSize:11, fontWeight:600, color:"#16A34A" }}>📅 Miglior giorno: {aiInsights.best_giorno}</span>}
             {aiInsights.best_formato && <span style={{ background:"rgba(123,79,160,0.08)", border:"1px solid rgba(123,79,160,0.2)", borderRadius:20, padding:"4px 14px", fontSize:11, fontWeight:600, color:"#7B4FA0" }}>🎬 Formato top: {aiInsights.best_formato}</span>}
           </div>
           <div style={S.analysisSubLabel}>💡 Consigli strategici</div>
-          {aiInsights.consigli?.map((c,i) => <div key={i} style={{ fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"#444", lineHeight:1.7, paddingLeft:4 }}>→ {c}</div>)}
+          {aiInsights.consigli?.map((c,i) => <div key={i} style={{ fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"var(--text2)", lineHeight:1.7, paddingLeft:4 }}>→ {c}</div>)}
         </div>
       )}
       {showAddPost && (
-        <div style={{ background:"#fff", border:"1.5px solid rgba(22,163,74,0.2)", borderRadius:14, padding:"20px 24px", marginBottom:20, animation:"slideDown 0.25s cubic-bezier(0.22,1,0.36,1)" }}>
+        <div style={{ background:"var(--surface)", border:"1.5px solid rgba(22,163,74,0.2)", borderRadius:14, padding:"20px 24px", marginBottom:20, animation:"slideDown 0.25s cubic-bezier(0.22,1,0.36,1)" }}>
           <div style={{ fontFamily:"'Playfair Display',serif", fontSize:15, fontWeight:700, marginBottom:16 }}>{editPost!==null?"✏️ Modifica post":"+ Nuovo post"}</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:12 }}>
             <div style={{ display:"flex", flexDirection:"column", gap:4 }}><label style={S.briefLabel}>Data</label><input type="date" style={{ ...S.briefInput, padding:"8px 12px" }} value={postDraft.date} onChange={e=>setPostDraft(d=>({...d,date:e.target.value}))} /></div>
@@ -796,11 +991,11 @@ export default function LenIA() {
             const eng = Number(post.likes||0)+Number(post.comments||0)+Number(post.saves||0)+Number(post.shares||0);
             const isTop = topPost && post.id===topPost.id;
             return (
-              <div key={post.id} style={{ background:"#fff", border:`1px solid ${isTop?"rgba(22,163,74,0.3)":"rgba(0,0,0,0.07)"}`, borderRadius:12, padding:"14px 18px", boxShadow:isTop?"0 2px 12px rgba(22,163,74,0.1)":"0 2px 8px rgba(0,0,0,0.04)" }}>
+              <div key={post.id} style={{ background:"var(--surface)", border:`1px solid ${isTop?"rgba(22,163,74,0.3)":"var(--border)"}`, borderRadius:12, padding:"14px 18px", boxShadow:isTop?"0 2px 12px rgba(22,163,74,0.1)":"0 2px 8px rgba(0,0,0,0.04)" }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
                   <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
                     {isTop && <span style={{ background:"rgba(22,163,74,0.1)", border:"1px solid rgba(22,163,74,0.3)", borderRadius:20, padding:"2px 10px", fontSize:10, fontWeight:700, color:"#16A34A" }}>🏆 top</span>}
-                    <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:700, color:"#555" }}>{post.date}</span>
+                    <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:700, color:"var(--text2)" }}>{post.date}</span>
                     <span style={{ ...S.modeTag, background:post.platform==="Instagram"?"#E8354A":"#1877F2" }}>{post.platform}</span>
                     <span style={S.platformTag}>{post.format}</span>
                   </div>
@@ -827,7 +1022,7 @@ export default function LenIA() {
   );
 
   return (
-    <div style={S.root}>
+    <div data-theme={dark?"dark":"light"} style={S.root}>
       <style>{css}</style>
       {!isMobile && <>
         <div ref={cursorRingRef} style={{ position:"fixed", left:-100, top:-100, width:18, height:18, borderRadius:"50%", background:"#E8354A", transform:"translate(-50%,-50%)", pointerEvents:"none", zIndex:99999, transition:"width 0.2s,height 0.2s,background 0.2s", mixBlendMode:"multiply" }} />
@@ -873,7 +1068,7 @@ export default function LenIA() {
               <span style={S.drawerTitle}>💡 Sessioni Brainstorm</span>
               <button className="clear-btn" style={{ ...S.clearBtn, fontSize:12 }} onClick={()=>setShowBSessions(false)} {...hov}>✕ chiudi</button>
             </div>
-            <div style={{ padding:"12px 20px", borderBottom:"1px solid rgba(0,0,0,0.07)" }}>
+            <div style={{ padding:"12px 20px", borderBottom:"1px solid var(--border)" }}>
               <button className="brief-save-btn" onClick={newBrainstormSession} style={{ ...S.saveBtn, background:"linear-gradient(135deg,#E8354A,#7B4FA0)", width:"100%", textAlign:"center", padding:"10px" }} {...hov}>+ Nuova sessione</button>
             </div>
             {bSessions.length===0 ? (
@@ -881,9 +1076,9 @@ export default function LenIA() {
             ) : (
               <div style={S.drawerList}>
                 {bSessions.map(s => (
-                  <div key={s.id} style={{ ...S.drawerItem, border:`1px solid ${bSessionId===s.id?"rgba(232,53,74,0.3)":"rgba(0,0,0,0.07)"}`, background:bSessionId===s.id?"rgba(232,53,74,0.03)":"#FAFAF8" }}>
+                  <div key={s.id} style={{ ...S.drawerItem, border:`1px solid ${bSessionId===s.id?"rgba(232,53,74,0.3)":"var(--border)"}`, background:bSessionId===s.id?"rgba(232,53,74,0.03)":"#FAFAF8" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-                      <div style={{ fontFamily:"'Playfair Display',serif", fontSize:13, fontWeight:700, color:"#1a1a1a", flex:1, marginRight:8 }}>{s.title}</div>
+                      <div style={{ fontFamily:"'Playfair Display',serif", fontSize:13, fontWeight:700, color:"var(--text)", flex:1, marginRight:8 }}>{s.title}</div>
                       <button className="copy-btn" style={{ ...S.copyBtn, color:"#E8354A", flexShrink:0 }} onClick={()=>deleteBrainstormSession(s.id)} {...hov}>✕</button>
                     </div>
                     <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#bbb" }}>{new Date(s.saved_at||s.created_at).toLocaleString("it-IT")}</div>
@@ -905,22 +1100,23 @@ export default function LenIA() {
             <div><div style={S.logoMain}>LEN-IA</div><div style={S.logoSub}>by Collettivo LEN · {userName}</div></div>
           </div>
           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-            <button className="clear-btn" onClick={()=>setShowHistory(true)} style={{ ...S.clearBtn, borderColor:savedItems.length>0?"#7B4FA0":"rgba(0,0,0,0.12)", color:savedItems.length>0?"#7B4FA0":"#999", position:"relative" }} {...hov}>
+            <button className="clear-btn" onClick={()=>setShowHistory(true)} style={{ ...S.clearBtn, borderColor:savedItems.length>0?"#7B4FA0":"var(--border2)", color:savedItems.length>0?"#7B4FA0":"#999", position:"relative" }} {...hov}>
               {savedItems.length>0 && <span style={{ position:"absolute", top:3, right:3, width:6, height:6, borderRadius:"50%", background:"#7B4FA0" }} />}
               💾 storico{savedItems.length>0?` (${savedItems.length})`:""}
             </button>
-            <button className="clear-btn" onClick={()=>setShowBSessions(true)} style={{ ...S.clearBtn, borderColor:bSessions.length>0?"#E8354A":"rgba(0,0,0,0.12)", color:bSessions.length>0?"#E8354A":"#999", position:"relative" }} {...hov}>
+            <button className="clear-btn" onClick={()=>setShowBSessions(true)} style={{ ...S.clearBtn, borderColor:bSessions.length>0?"#E8354A":"var(--border2)", color:bSessions.length>0?"#E8354A":"#999", position:"relative" }} {...hov}>
               {bSessions.length>0 && <span style={{ position:"absolute", top:3, right:3, width:6, height:6, borderRadius:"50%", background:"#E8354A" }} />}
               💡 sessioni{bSessions.length>0?` (${bSessions.length})`:""}
             </button>
-            <button className="clear-btn" onClick={()=>setShowBrief(b=>!b)} style={{ ...S.clearBtn, borderColor:hasBrief?"#E8354A":"rgba(0,0,0,0.12)", color:hasBrief?"#E8354A":"#999", position:"relative" }} {...hov}>
+            <button className="clear-btn" onClick={()=>setShowBrief(b=>!b)} style={{ ...S.clearBtn, borderColor:hasBrief?"#E8354A":"var(--border2)", color:hasBrief?"#E8354A":"#999", position:"relative" }} {...hov}>
               {hasBrief && <span style={{ position:"absolute", top:3, right:3, width:6, height:6, borderRadius:"50%", background:"#E8354A" }} />}
               🎨 brief
             </button>
-            <button className="clear-btn" onClick={()=>setMode(mode==="calendar"?"caption":"calendar")} style={{ ...S.clearBtn, borderColor:mode==="calendar"?"#7B4FA0":"rgba(0,0,0,0.12)", color:mode==="calendar"?"#7B4FA0":"#999" }} {...hov}>
+            <button className="clear-btn" onClick={()=>setMode(mode==="calendar"?"caption":"calendar")} style={{ ...S.clearBtn, borderColor:mode==="calendar"?"#7B4FA0":"var(--border2)", color:mode==="calendar"?"#7B4FA0":"#999" }} {...hov}>
               📅 calendario
             </button>
-            {mode!=="analytics" && mode!=="calendar" && <button className="clear-btn" onClick={clearChat} style={S.clearBtn} {...hov}>↺ reset</button>}
+            <button className="clear-btn" onClick={()=>setDark(d=>!d)} title={dark?"Passa alla modalità chiara":"Passa alla modalità scura"} style={S.clearBtn} {...hov}>{dark?"☀️ chiaro":"🌙 scuro"}</button>
+            {mode!=="analytics" && mode!=="calendar" && mode!=="live" && <button className="clear-btn" onClick={clearChat} style={S.clearBtn} {...hov}>↺ reset</button>}
           </div>
         </div>
       </header>
@@ -949,7 +1145,7 @@ export default function LenIA() {
         {MODES.filter(m=>m.id!=="calendar").map(m => <button key={m.id} className="mode-btn" onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id?{ background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }:{ color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
       </div>
 
-      {mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : (
+      {mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : mode==="live" ? <LiveSessionPanel /> : (
         <>
           {mode !== "brainstorm" && (
             <div style={S.platformBar}>
@@ -1003,7 +1199,7 @@ export default function LenIA() {
                         {/* legacy single attachment support */}
                         {msg.attachmentPreview && !msg.attachmentPreviews && <img src={msg.attachmentPreview} alt="allegato" style={{ maxWidth:"100%", borderRadius:8, marginBottom:8, maxHeight:160, objectFit:"cover" }} />}
                         {msg.attachmentName && !msg.attachmentPreviews && <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#7B4FA0", marginBottom:6 }}>📎 {msg.attachmentName}</div>}
-                        <p style={{ fontSize:13, color:"#333", lineHeight:1.7, fontFamily:"'DM Sans',sans-serif" }}>{msg.display}</p>
+                        <p style={{ fontSize:13, color:"var(--text2)", lineHeight:1.7, fontFamily:"'DM Sans',sans-serif" }}>{msg.display}</p>
                       </div>
                     </div>
                   ) : (
@@ -1011,7 +1207,7 @@ export default function LenIA() {
                       <div style={{ ...S.assistantAvatar, background:`linear-gradient(135deg,${msgMode?.color||"#E8354A"},${msgMode?.color||"#E8354A"}88)` }}>✦</div>
                       <div style={S.assistantContent}>
                         <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:12, fontStyle:"italic", color:"#bbb", letterSpacing:"0.05em" }}>LEN-IA</div>
-                        <pre style={{ ...S.assistantText, borderColor: msg.isError?"rgba(232,53,74,0.3)":"rgba(0,0,0,0.07)" }}>{msg.content}</pre>
+                        <pre style={{ ...S.assistantText, borderColor: msg.isError?"rgba(232,53,74,0.3)":"var(--border)" }}>{msg.content}</pre>
                         {msg.isError ? (
                           <button className="copy-btn" style={{ ...S.copyBtn, color:"#E8354A", fontWeight:600 }} onClick={()=>sendMessage(msg.retryHistory)} {...hov}>↺ riprova →</button>
                         ) : (
@@ -1073,11 +1269,11 @@ export default function LenIA() {
             {attachments.length > 0 && (
               <div style={{ maxWidth:860, margin:"0 auto 10px", display:"flex", gap:8, flexWrap:"wrap" }}>
                 {attachments.map((att, ai) => (
-                  <div key={ai} style={{ display:"flex", alignItems:"center", gap:6, background:"#fff", border:`1px solid ${currentMode.color}44`, borderRadius:10, padding:"6px 10px" }}>
+                  <div key={ai} style={{ display:"flex", alignItems:"center", gap:6, background:"var(--surface)", border:`1px solid ${currentMode.color}44`, borderRadius:10, padding:"6px 10px" }}>
                     {att.preview
                       ? <img src={att.preview} alt="preview" style={{ width:32, height:32, borderRadius:4, objectFit:"cover" }} />
                       : <span style={{ fontSize:16 }}>📎</span>}
-                    <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#555", maxWidth:100, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{att.name}</span>
+                    <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"var(--text2)", maxWidth:100, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{att.name}</span>
                     <button onClick={()=>setAttachments(p=>p.filter((_,j)=>j!==ai))} style={{ background:"transparent", border:"none", color:"#ccc", fontSize:14, cursor:"pointer", padding:0 }}>✕</button>
                   </div>
                 ))}
@@ -1110,6 +1306,9 @@ export default function LenIA() {
 }
 
 const css = `
+  [data-theme="light"] { --bg:#FAFAF8; --surface:#fff; --surface2:#FAFAF8; --text:#1a1a1a; --text2:#333; --border:rgba(0,0,0,0.07); --border2:rgba(0,0,0,0.12); --track:#f0ede8; --glass:rgba(250,250,248,0.92); --glass2:rgba(255,255,255,0.85); color-scheme: light; }
+  [data-theme="dark"]  { --bg:#111114; --surface:#1d1d22; --surface2:#17171b; --text:#f2efea; --text2:#e2dfd9; --border:rgba(255,255,255,0.10); --border2:rgba(255,255,255,0.18); --track:#2a2a30; --glass:rgba(17,17,20,0.92); --glass2:rgba(24,24,28,0.85); color-scheme: dark; }
+  [data-theme="dark"] ::placeholder { color:#777; }
   @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=DM+Sans:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   @media (pointer: fine) { * { cursor: none !important; } }
@@ -1143,62 +1342,62 @@ const css = `
 `;
 
 const S = {
-  root: { fontFamily:"'DM Sans',sans-serif", background:"#FAFAF8", minHeight:"100vh", display:"flex", flexDirection:"column", position:"relative", overflow:"hidden", color:"#1a1a1a" },
+  root: { fontFamily:"'DM Sans',sans-serif", background:"var(--bg)", minHeight:"100vh", display:"flex", flexDirection:"column", position:"relative", overflow:"hidden", color:"var(--text)" },
   bgNoise: { position:"fixed", inset:0, backgroundImage:`url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E")`, pointerEvents:"none", zIndex:0, opacity:0.4 },
   bgA1: { position:"fixed", top:-80, right:-80, width:360, height:360, borderRadius:"50%", background:"radial-gradient(circle,rgba(232,53,74,0.06) 0%,transparent 70%)", pointerEvents:"none", zIndex:0 },
   bgA2: { position:"fixed", bottom:-100, left:-60, width:400, height:400, borderRadius:"50%", background:"radial-gradient(circle,rgba(43,181,174,0.06) 0%,transparent 70%)", pointerEvents:"none", zIndex:0 },
   drawerOverlay: { position:"fixed", inset:0, background:"rgba(0,0,0,0.22)", backdropFilter:"blur(4px)", zIndex:1000, display:"flex", justifyContent:"flex-end" },
-  drawer: { width:420, maxWidth:"92vw", background:"#fff", height:"100%", display:"flex", flexDirection:"column", boxShadow:"-8px 0 40px rgba(0,0,0,0.12)", animation:"slideInRight 0.3s cubic-bezier(0.22,1,0.36,1)" },
-  drawerHeader: { padding:"22px 24px 18px", borderBottom:"1px solid rgba(0,0,0,0.07)", display:"flex", justifyContent:"space-between", alignItems:"center" },
-  drawerTitle: { fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:900, color:"#1a1a1a" },
+  drawer: { width:420, maxWidth:"92vw", background:"var(--surface)", height:"100%", display:"flex", flexDirection:"column", boxShadow:"-8px 0 40px rgba(0,0,0,0.12)", animation:"slideInRight 0.3s cubic-bezier(0.22,1,0.36,1)" },
+  drawerHeader: { padding:"22px 24px 18px", borderBottom:"1px solid var(--border)", display:"flex", justifyContent:"space-between", alignItems:"center" },
+  drawerTitle: { fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:900, color:"var(--text)" },
   drawerEmpty: { flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:40, textAlign:"center" },
   drawerList: { flex:1, overflowY:"auto", padding:"16px 20px", display:"flex", flexDirection:"column", gap:14 },
-  drawerItem: { background:"#FAFAF8", border:"1px solid rgba(0,0,0,0.07)", borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:10 },
+  drawerItem: { background:"var(--surface2)", border:"1px solid var(--border)", borderRadius:12, padding:"14px 16px", display:"flex", flexDirection:"column", gap:10 },
   drawerItemMeta: { display:"flex", gap:6, alignItems:"center" },
-  drawerItemText: { fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"#444", lineHeight:1.7, whiteSpace:"pre-wrap", maxHeight:110, overflow:"hidden", WebkitMaskImage:"linear-gradient(to bottom,black 60%,transparent 100%)" },
-  header: { borderBottom:"1px solid rgba(0,0,0,0.07)", background:"rgba(250,250,248,0.92)", backdropFilter:"blur(20px)", position:"relative", zIndex:10 },
+  drawerItemText: { fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"var(--text2)", lineHeight:1.7, whiteSpace:"pre-wrap", maxHeight:110, overflow:"hidden", WebkitMaskImage:"linear-gradient(to bottom,black 60%,transparent 100%)" },
+  header: { borderBottom:"1px solid var(--border)", background:"var(--glass)", backdropFilter:"blur(20px)", position:"relative", zIndex:10 },
   headerInner: { maxWidth:900, margin:"0 auto", padding:"16px 28px", display:"flex", alignItems:"center", justifyContent:"space-between" },
   logo: { display:"flex", alignItems:"center", gap:14 },
   logoIconWrap: { width:40, height:40, background:"linear-gradient(135deg,#E8354A,#2BB5AE)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", animation:"floatSymbol 3s ease-in-out infinite" },
   logoMain: { fontFamily:"'Playfair Display',serif", fontSize:22, fontWeight:900, background:"linear-gradient(135deg,#E8354A 0%,#7B4FA0 60%,#2BB5AE 100%)", backgroundSize:"200% auto", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", animation:"gradientShift 4s ease infinite", letterSpacing:"-0.02em" },
   logoSub: { fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#aaa", letterSpacing:"0.18em", textTransform:"uppercase", marginTop:1 },
-  clearBtn: { background:"transparent", border:"1px solid rgba(0,0,0,0.12)", color:"#888", fontFamily:"'DM Sans',sans-serif", fontSize:12, fontWeight:500, padding:"6px 14px", borderRadius:20, letterSpacing:"0.04em" },
-  briefPanel: { borderBottom:"1px solid rgba(0,0,0,0.07)", background:"rgba(255,255,255,0.98)", backdropFilter:"blur(20px)", position:"relative", zIndex:9, animation:"slideDown 0.25s cubic-bezier(0.22,1,0.36,1)", boxShadow:"0 8px 32px rgba(0,0,0,0.06)" },
+  clearBtn: { background:"transparent", border:"1px solid var(--border)", color:"#888", fontFamily:"'DM Sans',sans-serif", fontSize:12, fontWeight:500, padding:"6px 14px", borderRadius:20, letterSpacing:"0.04em" },
+  briefPanel: { borderBottom:"1px solid var(--border)", background:"var(--glass)", backdropFilter:"blur(20px)", position:"relative", zIndex:9, animation:"slideDown 0.25s cubic-bezier(0.22,1,0.36,1)", boxShadow:"0 8px 32px rgba(0,0,0,0.06)" },
   briefInner: { maxWidth:900, margin:"0 auto", padding:"26px 28px 20px", display:"flex", flexDirection:"column", gap:18 },
-  briefTitle: { fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:700, color:"#1a1a1a" },
+  briefTitle: { fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:700, color:"var(--text)" },
   briefSubtitle: { fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#999", letterSpacing:"0.06em", marginTop:3 },
   briefSection: { display:"flex", flexDirection:"column", gap:9 },
   briefLabel: { fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#bbb", letterSpacing:"0.14em", textTransform:"uppercase", fontWeight:600 },
-  toneChip: { padding:"6px 16px", fontSize:12, fontWeight:500, border:"1.5px solid rgba(0,0,0,0.12)", background:"transparent", color:"#888", borderRadius:20, fontFamily:"'DM Sans',sans-serif" },
+  toneChip: { padding:"6px 16px", fontSize:12, fontWeight:500, border:"1.5px solid var(--border)", background:"transparent", color:"#888", borderRadius:20, fontFamily:"'DM Sans',sans-serif" },
   toneChipActive: { background:"rgba(232,53,74,0.08)", borderColor:"#E8354A", color:"#E8354A" },
-  briefInput: { background:"#FAFAF8", border:"1.5px solid rgba(0,0,0,0.1)", borderRadius:10, padding:"10px 14px", fontSize:13, fontFamily:"'DM Sans',sans-serif", color:"#333", width:"100%", lineHeight:1.7, outline:"none", transition:"all 0.2s ease" },
+  briefInput: { background:"var(--surface2)", border:"1.5px solid var(--border)", borderRadius:10, padding:"10px 14px", fontSize:13, fontFamily:"'DM Sans',sans-serif", color:"var(--text2)", width:"100%", lineHeight:1.7, outline:"none", transition:"all 0.2s ease" },
   saveBtn: { background:"linear-gradient(135deg,#E8354A,#7B4FA0)", border:"none", color:"#fff", fontFamily:"'DM Sans',sans-serif", fontWeight:600, fontSize:13, padding:"10px 26px", borderRadius:20, letterSpacing:"0.02em" },
-  modeBar: { display:"flex", borderBottom:"1px solid rgba(0,0,0,0.07)", background:"rgba(255,255,255,0.8)", position:"relative", zIndex:10, overflowX:"auto" },
+  modeBar: { display:"flex", borderBottom:"1px solid var(--border)", background:"var(--glass2)", position:"relative", zIndex:10, overflowX:"auto" },
   modeBtn: { flex:1, minWidth:130, padding:"13px 18px", background:"transparent", border:"none", borderBottom:"3px solid transparent", display:"flex", flexDirection:"column", gap:3, color:"#bbb", fontFamily:"'DM Sans',sans-serif" },
   modeBtnLabel: { fontSize:12, fontWeight:700 },
   modeBtnDesc: { fontSize:9.5, opacity:0.6, letterSpacing:"0.03em" },
-  platformBar: { display:"flex", alignItems:"center", gap:8, padding:"9px 28px", borderBottom:"1px solid rgba(0,0,0,0.05)", background:"rgba(250,250,248,0.9)", position:"relative", zIndex:10, overflowX:"auto" },
-  platformBtn: { padding:"5px 18px", fontSize:12, fontWeight:500, border:"1.5px solid rgba(0,0,0,0.1)", background:"transparent", color:"#999", borderRadius:20, fontFamily:"'DM Sans',sans-serif", flexShrink:0 },
-  ctxChip: { padding:"5px 14px", fontSize:11, fontWeight:500, border:"1.5px solid rgba(0,0,0,0.08)", background:"transparent", color:"#aaa", borderRadius:20, fontFamily:"'DM Sans',sans-serif", flexShrink:0, whiteSpace:"nowrap" },
+  platformBar: { display:"flex", alignItems:"center", gap:8, padding:"9px 28px", borderBottom:"1px solid var(--border)", background:"var(--glass)", position:"relative", zIndex:10, overflowX:"auto" },
+  platformBtn: { padding:"5px 18px", fontSize:12, fontWeight:500, border:"1.5px solid var(--border)", background:"transparent", color:"#999", borderRadius:20, fontFamily:"'DM Sans',sans-serif", flexShrink:0 },
+  ctxChip: { padding:"5px 14px", fontSize:11, fontWeight:500, border:"1.5px solid var(--border)", background:"transparent", color:"#aaa", borderRadius:20, fontFamily:"'DM Sans',sans-serif", flexShrink:0, whiteSpace:"nowrap" },
   chat: { flex:1, overflowY:"auto", padding:"36px 28px 120px", maxWidth:900, width:"100%", margin:"0 auto", display:"flex", flexDirection:"column", gap:24, position:"relative", zIndex:5 },
   emptyState: { display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14, padding:"60px 20px", textAlign:"center" },
-  emptyTitle: { fontFamily:"'Playfair Display',serif", fontSize:32, fontWeight:900, color:"#1a1a1a", letterSpacing:"-0.02em" },
+  emptyTitle: { fontFamily:"'Playfair Display',serif", fontSize:32, fontWeight:900, color:"var(--text)", letterSpacing:"-0.02em" },
   chip: { fontFamily:"'DM Sans',sans-serif", fontSize:12, fontWeight:500, padding:"8px 18px", border:"1.5px solid rgba(232,53,74,0.3)", borderRadius:24, color:"#E8354A", background:"rgba(232,53,74,0.04)", display:"inline-flex", alignItems:"center" },
   msgWrapper: { display:"flex", flexDirection:"column", gap:4 },
-  userBubble: { background:"#fff", border:"1px solid rgba(0,0,0,0.08)", borderRadius:"18px 18px 4px 18px", padding:"14px 18px", maxWidth:"70%", boxShadow:"0 2px 12px rgba(0,0,0,0.06)" },
+  userBubble: { background:"var(--surface)", border:"1px solid var(--border)", borderRadius:"18px 18px 4px 18px", padding:"14px 18px", maxWidth:"70%", boxShadow:"0 2px 12px rgba(0,0,0,0.06)" },
   modeTag: { fontSize:10, padding:"2px 10px", borderRadius:10, fontWeight:700, color:"#fff", fontFamily:"'DM Sans',sans-serif", letterSpacing:"0.04em" },
   platformTag: { fontSize:10, padding:"2px 10px", borderRadius:10, background:"rgba(0,0,0,0.05)", color:"#aaa", fontFamily:"'DM Sans',sans-serif" },
   assistantRow: { display:"flex", gap:14, alignItems:"flex-start" },
   assistantAvatar: { width:36, height:36, borderRadius:"50%", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, color:"#fff", boxShadow:"0 4px 14px rgba(0,0,0,0.15)" },
   assistantContent: { display:"flex", flexDirection:"column", gap:8, flex:1 },
-  assistantText: { fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#2a2a2a", lineHeight:1.85, whiteSpace:"pre-wrap", background:"#fff", border:"1px solid rgba(0,0,0,0.07)", borderRadius:"4px 18px 18px 18px", padding:"18px 22px", boxShadow:"0 2px 16px rgba(0,0,0,0.05)" },
+  assistantText: { fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"var(--text2)", lineHeight:1.85, whiteSpace:"pre-wrap", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:"4px 18px 18px 18px", padding:"18px 22px", boxShadow:"0 2px 16px rgba(0,0,0,0.05)" },
   copyBtn: { alignSelf:"flex-start", background:"transparent", border:"none", color:"#ccc", fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:500, padding:"4px 0", letterSpacing:"0.06em" },
-  analysisCard: { background:"#FAFAF8", border:"1px solid rgba(43,181,174,0.2)", borderRadius:14, padding:"20px 22px", display:"flex", flexDirection:"column", gap:14, animation:"slideUp 0.4s cubic-bezier(0.22,1,0.36,1)" },
+  analysisCard: { background:"var(--surface2)", border:"1px solid rgba(43,181,174,0.2)", borderRadius:14, padding:"20px 22px", display:"flex", flexDirection:"column", gap:14, animation:"slideUp 0.4s cubic-bezier(0.22,1,0.36,1)" },
   analysisSubLabel: { fontFamily:"'DM Sans',sans-serif", fontSize:10, fontWeight:700, color:"#aaa", letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:6 },
-  analysisBullet: { fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"#555", lineHeight:1.7 },
-  analysisOptimized: { fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#1a1a1a", lineHeight:1.85, whiteSpace:"pre-wrap", background:"#fff", border:"1px solid rgba(43,181,174,0.25)", borderRadius:10, padding:"14px 16px" },
-  inputArea: { borderTop:"1px solid rgba(0,0,0,0.07)", background:"rgba(250,250,248,0.97)", backdropFilter:"blur(20px)", padding:"18px 28px 22px", position:"sticky", bottom:0, zIndex:20 },
+  analysisBullet: { fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"var(--text2)", lineHeight:1.7 },
+  analysisOptimized: { fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"var(--text)", lineHeight:1.85, whiteSpace:"pre-wrap", background:"var(--surface)", border:"1px solid rgba(43,181,174,0.25)", borderRadius:10, padding:"14px 16px" },
+  inputArea: { borderTop:"1px solid var(--border)", background:"var(--glass)", backdropFilter:"blur(20px)", padding:"18px 28px 22px", position:"sticky", bottom:0, zIndex:20 },
   inputWrapper: { maxWidth:900, margin:"0 auto", display:"flex", gap:12, alignItems:"flex-end" },
-  textarea: { flex:1, background:"#fff", border:"1.5px solid rgba(0,0,0,0.1)", borderRadius:14, padding:"12px 18px", fontSize:13, fontFamily:"'DM Sans',sans-serif", color:"#1a1a1a", resize:"none", lineHeight:1.7, transition:"all 0.2s ease", boxShadow:"0 2px 8px rgba(0,0,0,0.04)" },
+  textarea: { flex:1, background:"var(--surface)", border:"1.5px solid var(--border)", borderRadius:14, padding:"12px 18px", fontSize:13, fontFamily:"'DM Sans',sans-serif", color:"var(--text)", resize:"none", lineHeight:1.7, transition:"all 0.2s ease", boxShadow:"0 2px 8px rgba(0,0,0,0.04)" },
   sendBtn: { width:52, height:52, border:"none", borderRadius:14, fontSize:20, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, boxShadow:"0 4px 16px rgba(0,0,0,0.1)" },
 };
