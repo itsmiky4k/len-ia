@@ -2,33 +2,33 @@
 // LEN-IA v1.1 — fix cursor
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-
+ 
 // ─── SYSTEM PROMPTS ──────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `Sei LEN-IA, la Social Media Manager AI del Collettivo LEN — un collettivo di artisti giovani, pop, freschi ed esplosivi. Il tuo tono è energico, diretto, creativo e mai noioso. Parli come una persona vera, non come un robot corporate.
-
+ 
 Puoi fare queste cose:
 1. Scrivere caption per Instagram e Facebook.
 2. Suggerire hashtag: un mix strategico di hashtag di nicchia, community e trending.
 3. Pianificare contenuti / calendario editoriale: piani editoriali con idee fresche.
 4. Reels & Stories: script, hook, overlay text e sticker copy per il formato verticale.
-
+ 
 Tono: pop, giovane, autentico, un po' ironico quando serve. Mescola italiano e inglese. Zero corporate-speak.
 Rispondi sempre in italiano (con qualche parola inglese se ci sta bene).`;
-
+ 
 const ANALYSIS_SYSTEM = `Sei un esperto di copywriting e social media marketing. Analizza la caption che ti viene fornita e rispondi SOLO con un JSON valido, senza markdown, senza backtick, senza testo aggiuntivo. Il JSON deve avere esattamente questa struttura:
 {"voto":<numero 1-10>,"giudizio":"<frase sintetica>","punti_forza":["<p1>","<p2>"],"punti_deboli":["<p1>","<p2>"],"caption_ottimizzata":"<caption riscritta>"}`;
-
+ 
 const BRAINSTORM_SYSTEM = `Sei LEN-IA in modalita Brainstorming — il consulente creativo del Collettivo LEN. Qui sei libero da schemi fissi: non devi produrre caption, hashtag o script, ma ragionare insieme al team su idee, direzioni creative, concept, identita, temi, campagne, collaborazioni, strategie.
-
+ 
 Il tuo ruolo e' quello di un art director e consulente di comunicazione che conosce benissimo il collettivo. Fai domande, proponi angolazioni inaspettate, sfida le idee, suggerisci connessioni tra concetti. Sii provocatorio quando serve, poetico quando e' giusto, pratico quando necessario.
-
+ 
 Alla fine di ogni risposta, se ha senso, proponi 1-3 "prossimi passi concreti" che l'utente puo' portare nelle altre tab (Caption, Hashtag, Calendario, Reels) — preceduti dalla dicitura "→ PORTA NELLE ALTRE TAB:".
-
+ 
 Tono: da collega creativo, non da assistente. Parla come un membro del team.`;
-
-
+ 
+ 
 const REELS_SYSTEM = `Sei LEN-IA in modalita Video — il tuo assistente per la produzione video del Collettivo LEN. Non sei solo uno script writer: sei un direttore creativo video che guida il team dalla pre-produzione alla post-produzione.
-
+ 
 Per ogni richiesta fornisci:
 - CONCEPT: idea visiva e narrativa del video
 - STORYBOARD: sequenza delle scene con descrizione visiva dettagliata
@@ -38,21 +38,21 @@ Per ogni richiesta fornisci:
 - AUDIO: suggerimenti per musica, sound design, voiceover
 - MONTAGGIO: ritmo, transizioni, durata consigliata
 - TRUCCHI & TIPS: consigli pro per massimizzare l'engagement video
-
+ 
 Tono: pratico e creativo. Dai consigli che un vero videomaker darebbe al team.
 Rispondi sempre in italiano.`;
-
+ 
 const ANALYTICS_SYSTEM = `Sei un esperto di social media analytics. Analizza i dati dei post forniti e rispondi SOLO con un JSON valido, senza markdown, senza backtick. Struttura:
 {"sintesi":"<2-3 frasi su trend generale>","top_post":{"motivo":"<perche ha performato bene>"},"bottom_post":{"motivo":"<perche ha performato peggio>"},"consigli":["<consiglio 1>","<consiglio 2>","<consiglio 3>"],"best_giorno":"<giorno della settimana con piu engagement>","best_formato":"<formato che performa meglio>"}`;
-
+ 
 const LIVE_SYSTEM = `Sei LEN-IA in modalità Sessione Live — partecipi a una conversazione di gruppo con più membri del Collettivo LEN contemporaneamente, in tempo reale (es. durante una riunione o una sessione di progettazione condivisa).
-
+ 
 Ogni messaggio è preceduto dal nome di chi lo scrive (es. "Marco: ..."), così puoi distinguere chi dice cosa e rivolgerti alle persone per nome quando serve.
-
+ 
 Il tuo ruolo è facilitare la discussione di gruppo: fai da assistente creativo condiviso, riassumi quando la conversazione si allarga, evidenzia punti di accordo o disaccordo tra i membri, e proponi sintesi o prossimi passi concreti quando la discussione lo richiede.
-
+ 
 Tono: collaborativo, diretto, mai robotico, coerente con lo spirito pop ed energico del collettivo. Rispondi sempre in italiano.`;
-
+ 
 const MODES = [
   { id: "brainstorm", label: "💡 Brainstorm",  desc: "Consulente creativo libero da schemi",    color: "#E8354A" },
   { id: "caption",    label: "✍️ Caption",    desc: "Scrivi una caption per il tuo post",       color: "#2BB5AE" },
@@ -73,28 +73,57 @@ const CONTEXTUAL_CHIPS = {
 };
 const EMPTY_POST = { date:"", platform:"Instagram", format:"Post", caption:"", reach:0, impressions:0, likes:0, comments:0, saves:0, shares:0, followers_delta:0, hashtags:"" };
 const FORMATS = ["Post","Reel","Story","Carosello"];
-
+ 
 // ─── API HELPERS ─────────────────────────────────────────────────────────────
+const authHeaders = async () => {
+  const { data:{ session:s } } = await supabase.auth.getSession();
+  return s ? { Authorization: `Bearer ${s.access_token}` } : {};
+};
 const callAI = async (body) => {
-  const res = await fetch("/api/chat", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+  const headers = { "Content-Type":"application/json", ...(await authHeaders()) };
+  const res = await fetch("/api/chat", { method:"POST", headers, body:JSON.stringify(body) });
   return res.json();
 };
-const dbGet = (table, user) => fetch(`/api/supabase?table=${table}&user=${encodeURIComponent(user)}`).then(r=>r.json());
-const dbPost = (table, record) => fetch("/api/supabase", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({table,record}) }).then(r=>r.json());
-const dbDelete = (table, id) => fetch("/api/supabase", { method:"DELETE", headers:{"Content-Type":"application/json"}, body:JSON.stringify({table,id}) }).then(r=>r.json());
-const dbPut = (table, id, record) => fetch("/api/supabase", { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify({table,id,record}) }).then(r=>r.json());
-
+const dbGet = async (table, user) => {
+  const headers = await authHeaders();
+  return fetch(`/api/supabase?table=${table}&user=${encodeURIComponent(user)}`, { headers }).then(r=>r.json());
+};
+const dbPost = async (table, record) => {
+  const headers = { "Content-Type":"application/json", ...(await authHeaders()) };
+  return fetch("/api/supabase", { method:"POST", headers, body:JSON.stringify({table,record}) }).then(r=>r.json());
+};
+const dbDelete = async (table, id) => {
+  const headers = { "Content-Type":"application/json", ...(await authHeaders()) };
+  return fetch("/api/supabase", { method:"DELETE", headers, body:JSON.stringify({table,id}) }).then(r=>r.json());
+};
+const dbPut = async (table, id, record) => {
+  const headers = { "Content-Type":"application/json", ...(await authHeaders()) };
+  return fetch("/api/supabase", { method:"PUT", headers, body:JSON.stringify({table,id,record}) }).then(r=>r.json());
+};
+ 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function LenIA() {
   // User
   const [userName, setUserName] = useState("");
   const [userInput, setUserInput] = useState("");
   const [userReady, setUserReady] = useState(false);
+ 
+  // ── AUTH (Supabase Auth, magic link) ──
+  const [session, setSession]         = useState(null);
+  const [profile, setProfile]         = useState(null);
+  const [authEmail, setAuthEmail]     = useState("");
+  const [authStage, setAuthStage]     = useState("idle");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [nameDraft, setNameDraft]     = useState("");
+  const [showTeam, setShowTeam]       = useState(false);
+  const [teamProfiles, setTeamProfiles] = useState([]);
+  const role = profile?.role || "membro";
+  const canWrite = role !== "ospite";
   const [loadingUser, setLoadingUser] = useState(false);
-
+ 
   // Dark mode
   const [dark, setDark] = useState(false);
-
+ 
   // Sessione Live (condivisa in tempo reale)
   const [liveCode, setLiveCode]         = useState("");
   const [activeLive, setActiveLive]     = useState(null);
@@ -102,7 +131,7 @@ export default function LenIA() {
   const [liveInput, setLiveInput]       = useState("");
   const [liveLoading, setLiveLoading]   = useState(false);
   const [liveOnline, setLiveOnline]     = useState([]);
-
+ 
   // Chat
   const [mode, setMode]         = useState("caption");
   const [platform, setPlatform] = useState("Instagram");
@@ -110,26 +139,26 @@ export default function LenIA() {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading]   = useState(false);
   const [history, setHistory]   = useState([]);
-
+ 
   // Brief
   const [showBrief, setShowBrief]   = useState(false);
   const [brief, setBrief]           = useState({ tones:[], keywords:"", examples:"" });
   const [briefId, setBriefId]       = useState(null);
   const [briefSaved, setBriefSaved] = useState(false);
-
+ 
   // Saved
   const [showHistory, setShowHistory] = useState(false);
   const [savedItems, setSavedItems]   = useState([]);
-
+ 
   // Brainstorm sessions
   const [bSessions, setBSessions]         = useState([]); // list of saved sessions
   const [bSessionId, setBSessionId]       = useState(null); // current session id
   const [showBSessions, setShowBSessions] = useState(false);
-
+ 
   // Analysis
   const [analyzing, setAnalyzing] = useState(null);
   const [analyses, setAnalyses]   = useState({});
-
+ 
   // Analytics
   const [posts, setPosts]             = useState([]);
   const [showAddPost, setShowAddPost] = useState(false);
@@ -137,7 +166,7 @@ export default function LenIA() {
   const [postDraft, setPostDraft]     = useState(EMPTY_POST);
   const [aiInsights, setAiInsights]   = useState(null);
   const [loadingInsights, setLoadingInsights] = useState(false);
-
+ 
   // Calendar
   const [calEvents, setCalEvents]         = useState([]);
   const [calMonth, setCalMonth]           = useState(new Date().getMonth());
@@ -145,7 +174,7 @@ export default function LenIA() {
   const [selectedDay, setSelectedDay]     = useState(null);
   const [calDraft, setCalDraft]           = useState({ title:"", platform:"Instagram", format:"Post", note:"" });
   const [editCalEvent, setEditCalEvent]   = useState(null);
-
+ 
   // Attachments (caption + brainstorm only)
   const [attachments, setAttachments] = useState([]); // array of { base64, mediaType, name, preview }
   const fileInputRef = useRef(null);
@@ -156,7 +185,7 @@ export default function LenIA() {
   const cursorTrailRefs = useRef([]);
   const bottomRef = useRef(null);
   const currentModeRef = useRef("#E8354A");
-
+ 
   // Keep currentModeRef in sync
   useEffect(() => {
     const m = MODES.find(m => m.id === mode);
@@ -166,14 +195,14 @@ export default function LenIA() {
     if (cursorDotRef.current)  cursorDotRef.current.style.background  = m.color;
     if (cursorRingRef.current) cursorRingRef.current.style.borderColor = m.color;
   }, [mode]);
-
+ 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.matchMedia("(pointer: coarse)").matches);
     checkMobile();
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
-
+ 
   useEffect(() => {
     if (isMobile) return;
     const trail = [];
@@ -202,48 +231,11 @@ export default function LenIA() {
     window.addEventListener("mousemove", fn);
     return () => window.removeEventListener("mousemove", fn);
   }, [isMobile]);
-
+ 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [messages, loading]);
-
-  // Auto-login se il nome è salvato in localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("lenia_user");
-    if (saved) {
-      setUserInput(saved);
-      // Triggera il login automaticamente
-      const autoLogin = async () => {
-        setLoadingUser(true);
-        setUserName(saved);
-        const [briefData, savedData, postsData, calData, bSessionsData] = await Promise.all([
-          dbGet("briefs", saved),
-          dbGet("saved_items", saved),
-          dbGet("analytics_posts", saved),
-          dbGet("calendar_events", saved),
-          dbGet("brainstorm_sessions", saved),
-        ]);
-        if (briefData?.length > 0) {
-          const b = briefData[0];
-          setBrief({ tones: b.tones || [], keywords: b.keywords || "", examples: b.examples || "" });
-          setBriefId(b.id);
-        }
-        if (savedData?.length > 0) setSavedItems(savedData.map(i => ({ id:i.id, content:i.content, mode:i.mode, platform:i.platform, savedAt: new Date(i.saved_at).toLocaleString("it-IT") })));
-        if (postsData?.length > 0) setPosts(postsData.map(p => ({ ...p, id:p.id, date:p.post_date, reach:p.reach||0, impressions:p.impressions||0, likes:p.likes||0, comments:p.comments||0, saves:p.saves||0, shares:p.shares||0, followers_delta:p.followers_delta||0 })));
-        if (calData?.length > 0) setCalEvents(calData.map(e => ({ ...e, date: e.event_date })));
-        if (bSessionsData?.length > 0) setBSessions(bSessionsData);
-        setLoadingUser(false);
-        setUserReady(true);
-      };
-      autoLogin();
-    }
-  }, []);
-
-  // Load data from Supabase when user logs in
-  const loginUser = async () => {
-    const name = userInput.trim();
-    if (!name) return;
-    setLoadingUser(true);
-    setUserName(name);
-
+ 
+  // Carica tutti i dati dell'utente dato il suo display_name (stessa logica di sempre)
+  const loadUserData = async (name) => {
     const [briefData, savedData, postsData, calData, bSessionsData] = await Promise.all([
       dbGet("briefs", name),
       dbGet("saved_items", name),
@@ -251,22 +243,92 @@ export default function LenIA() {
       dbGet("calendar_events", name),
       dbGet("brainstorm_sessions", name),
     ]);
-
     if (briefData?.length > 0) {
       const b = briefData[0];
       setBrief({ tones: b.tones || [], keywords: b.keywords || "", examples: b.examples || "" });
       setBriefId(b.id);
     }
     if (savedData?.length > 0) setSavedItems(savedData.map(i => ({ id:i.id, content:i.content, mode:i.mode, platform:i.platform, savedAt: new Date(i.saved_at).toLocaleString("it-IT") })));
-    if (postsData?.length > 0) setPosts(postsData.map(p => ({ ...p, id:p.id, date:p.post_date, reach:p.reach||0, impressions:p.impressions||0, likes:p.likes||0, comments:p.comments||0, saves:p.saves||0, shares:p.shares||0, followers_delta:p.followers_delta||0 })));
+    if (postsData?.length > 0) setPosts(postsData.map(p => ({ ...p, id:p.id, date:p.post_date, reach:p.reach||0, impressions:p.impressions||0, likes:p.likes||0, comments:p.comments||0, saves:p.saves||0, shares:p.shares||0 })));
     if (calData?.length > 0) setCalEvents(calData.map(e => ({ ...e, date: e.event_date })));
     if (bSessionsData?.length > 0) setBSessions(bSessionsData);
-
-    localStorage.setItem("lenia_user", name);
+  };
+ 
+  // Carica (o attende) il profilo collegato all'utente autenticato
+  const loadProfile = async (userId, retry=0) => {
+    const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
+    if (data) return data;
+    if (retry < 5) { await new Promise(r=>setTimeout(r,400)); return loadProfile(userId, retry+1); }
+    return null;
+  };
+ 
+  // ── AUTH BOOTSTRAP ──
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data:{ session:s } }) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+ 
+  useEffect(() => {
+    if (!session?.user) { setProfile(null); setUserReady(false); return; }
+    let cancelled = false;
+    (async () => {
+      setLoadingUser(true);
+      const p = await loadProfile(session.user.id);
+      if (cancelled) return;
+      setProfile(p);
+      if (p?.display_name) {
+        setUserName(p.display_name);
+        await loadUserData(p.display_name);
+        if (!cancelled) { setLoadingUser(false); setUserReady(true); }
+      } else {
+        setLoadingUser(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [session?.user?.id]);
+ 
+  const sendMagicLink = async () => {
+    const email = authEmail.trim();
+    if (!email) return;
+    setAuthLoading(true);
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: typeof window!=="undefined" ? window.location.origin : undefined } });
+    setAuthLoading(false);
+    if (error) { alert("Errore invio link: " + error.message); return; }
+    setAuthStage("sent");
+  };
+ 
+  const confirmDisplayName = async () => {
+    const name = nameDraft.trim();
+    if (!name || !session?.user) return;
+    setLoadingUser(true);
+    const { data, error } = await supabase.from("profiles").update({ display_name:name }).eq("id", session.user.id).select().single();
+    if (error) { alert("Errore salvataggio nome: " + error.message); setLoadingUser(false); return; }
+    setProfile(data);
+    setUserName(name);
+    await loadUserData(name);
     setLoadingUser(false);
     setUserReady(true);
   };
-
+ 
+  const logout = async () => {
+    await supabase.auth.signOut();
+    setSession(null); setProfile(null); setUserReady(false); setUserName("");
+    setAuthEmail(""); setAuthStage("idle");
+  };
+ 
+  const openTeamPanel = async () => {
+    setShowTeam(true);
+    const { data } = await supabase.from("profiles").select("*").order("created_at", { ascending:true });
+    setTeamProfiles(data || []);
+  };
+ 
+  const changeRole = async (id, newRole) => {
+    const { error } = await supabase.from("profiles").update({ role:newRole }).eq("id", id);
+    if (error) { alert("Errore aggiornamento ruolo: " + error.message); return; }
+    setTeamProfiles(p => p.map(x => x.id===id ? { ...x, role:newRole } : x));
+  };
+ 
   // ── BRAINSTORM SESSION FUNCTIONS ──
   const saveBrainstormSession = async (msgs, hist) => {
     if (msgs.length === 0) return;
@@ -288,7 +350,7 @@ export default function LenIA() {
       }
     }
   };
-
+ 
   const loadBrainstormSession = (session) => {
     try {
       const msgs = JSON.parse(session.messages || "[]");
@@ -300,20 +362,20 @@ export default function LenIA() {
       setMode("brainstorm");
     } catch {}
   };
-
+ 
   const deleteBrainstormSession = async (id) => {
     await dbDelete("brainstorm_sessions", id);
     setBSessions(p => p.filter(s => s.id !== id));
     if (bSessionId === id) { setBSessionId(null); }
   };
-
+ 
   const newBrainstormSession = () => {
     setMessages([]);
     setHistory([]);
     setBSessionId(null);
     setShowBSessions(false);
   };
-
+ 
   const currentMode = MODES.find(m => m.id === mode);
   // ── DARK MODE: carica preferenza salvata e salvala a ogni cambio ──
   useEffect(() => {
@@ -326,10 +388,10 @@ export default function LenIA() {
   useEffect(() => {
     try { localStorage.setItem("len-ia-theme", dark ? "dark" : "light"); } catch {}
   }, [dark]);
-
+ 
   // ── SESSIONE LIVE ──
   const genLiveCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
-
+ 
   const createLiveSession = async (title) => {
     const code = genLiveCode();
     const { data, error } = await supabase
@@ -340,7 +402,7 @@ export default function LenIA() {
     if (error) { alert("Errore creazione stanza: " + error.message); return; }
     setActiveLive(data);
   };
-
+ 
   const joinLiveSession = async (codeInput) => {
     const code = (codeInput || "").trim().toUpperCase();
     if (!code) return;
@@ -348,9 +410,9 @@ export default function LenIA() {
     if (error || !data) { alert("Nessuna stanza trovata con questo codice."); return; }
     setActiveLive(data);
   };
-
+ 
   const leaveLiveSession = () => { setActiveLive(null); setLiveMessages([]); setLiveOnline([]); };
-
+ 
   // Chi scrive è anche l'unico a chiamare l'AI: gli altri vedono tutto arrivare via realtime,
   // così l'AI non risponde mai due volte allo stesso messaggio.
   const sendLiveMessage = async () => {
@@ -381,19 +443,19 @@ export default function LenIA() {
     }
     setLiveLoading(false);
   };
-
+ 
   // Sottoscrizione realtime + presence
   useEffect(() => {
     if (!activeLive) return;
     let cancelled = false;
-
+ 
     supabase.from("shared_messages").select("*").eq("session_id", activeLive.id)
       .order("created_at", { ascending: true })
       .then(({ data }) => { if (!cancelled) setLiveMessages(prev => {
         const ids = new Set((data || []).map(m => m.id));
         return [...(data || []), ...prev.filter(m => !ids.has(m.id))];
       }); });
-
+ 
     const channel = supabase
       .channel(`live-session-${activeLive.id}`)
       .on("postgres_changes",
@@ -406,14 +468,14 @@ export default function LenIA() {
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") await channel.track({ user_name: userName, online_at: new Date().toISOString() });
       });
-
+ 
     return () => { cancelled = true; supabase.removeChannel(channel); };
   }, [activeLive?.id]);
-
+ 
   // scroll automatico in fondo alla chat live
   const liveBottomRef = useRef(null);
   useEffect(() => { liveBottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [liveMessages, liveLoading]);
-
+ 
   const hov = {
     onMouseEnter: () => {
       isHoveringRef.current = true;
@@ -434,7 +496,7 @@ export default function LenIA() {
       }
     },
   };
-
+ 
   const buildSystemPrompt = () => {
     if (mode === "brainstorm") return BRAINSTORM_SYSTEM;
     if (mode === "reels") return REELS_SYSTEM;
@@ -449,7 +511,7 @@ export default function LenIA() {
     return SYSTEM_PROMPT + extra;
   };
   const hasBrief = brief.tones.length > 0 || brief.keywords.trim() || brief.examples.trim();
-
+ 
   const getModePrompt = () => {
     if (mode==="caption")    return `Scrivi una caption per ${platform} sul seguente argomento/contenuto: `;
     if (mode==="hashtag")    return `Suggerisci hashtag ottimizzati per ${platform} per il seguente contenuto: `;
@@ -457,7 +519,7 @@ export default function LenIA() {
     if (mode==="brainstorm") return "";
     return "";
   };
-
+ 
   const compressImage = (file) => new Promise((resolve) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -477,7 +539,7 @@ export default function LenIA() {
     };
     img.src = url;
   });
-
+ 
   const handleFileSelect = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -514,15 +576,15 @@ export default function LenIA() {
     setAttachments(prev => [...prev, ...newAttachments]);
     e.target.value = "";
   };
-
+ 
   const sendMessage = async (retryHistory = null) => {
     const isRetry = retryHistory !== null;
     if (!isRetry && (!input.trim() && !attachments.length) || loading) return;
     const textPrompt = isRetry ? "" : getModePrompt() + (input.trim() || (attachments.length ? `Analizza questi file: ${attachments.map(a=>a.name).join(", ")}` : ""));
-
+ 
     let userApiContent;
     let userMsg;
-
+ 
     if (!isRetry) {
       if (attachments.length > 0) {
         const fileBlocks = attachments.map(att =>
@@ -537,11 +599,11 @@ export default function LenIA() {
       const displayText = input.trim() || attachments.map(a=>`[${a.name}]`).join(" ");
       userMsg = { role:"user", content:userApiContent, display:displayText, mode, platform, attachmentPreviews:attachments.map(a=>a.preview).filter(Boolean), attachmentNames:attachments.filter(a=>!a.preview).map(a=>a.name) };
     }
-
+ 
     const trimmedHistory = isRetry
       ? retryHistory
       : [...history, { role:"user", content:userApiContent }].slice(-10);
-
+ 
     if (!isRetry) {
       setMessages(p => [...p, userMsg]);
       setHistory(trimmedHistory);
@@ -574,7 +636,7 @@ export default function LenIA() {
     }
     finally { setLoading(false); }
   };
-
+ 
   const analyzeCaption = async (msgIndex, text) => {
     setAnalyzing(msgIndex);
     try {
@@ -584,7 +646,7 @@ export default function LenIA() {
     } catch { setAnalyses(prev => ({ ...prev, [msgIndex]:{ error:true } })); }
     finally { setAnalyzing(null); }
   };
-
+ 
   const saveToHistory = async (msg, msgIndex) => {
     // Dedup basato sul contenuto, non sull'indice
     if (savedItems.find(i => i.content === msg.content)) return;
@@ -594,12 +656,12 @@ export default function LenIA() {
       setSavedItems(prev => [{ id:saved.id, content:msg.content, mode:msg.mode, platform:msg.platform, savedAt:new Date().toLocaleString("it-IT") }, ...prev]);
     }
   };
-
+ 
   const removeSaved = async (id) => {
     await dbDelete("saved_items", id);
     setSavedItems(p => p.filter(x => x.id !== id));
   };
-
+ 
   const saveBrief = async () => {
     const record = { user_name:userName, tones:brief.tones, keywords:brief.keywords, examples:brief.examples, updated_at:new Date().toISOString() };
     if (briefId) {
@@ -612,10 +674,10 @@ export default function LenIA() {
     setShowBrief(false);
     setTimeout(() => setBriefSaved(false), 2000);
   };
-
+ 
   const handleKey = (e) => { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
   const clearChat = () => { setMessages([]); setHistory([]); setAnalyses({}); };
-
+ 
   // ── ANALYTICS ──
   const savePost = async () => {
     if (!postDraft.date) return;
@@ -630,13 +692,13 @@ export default function LenIA() {
     }
     setPostDraft(EMPTY_POST); setShowAddPost(false); setEditPost(null); setAiInsights(null);
   };
-
+ 
   const deletePost = async (id) => {
     await dbDelete("analytics_posts", id);
     setPosts(p => p.filter(x => x.id !== id));
     setAiInsights(null);
   };
-
+ 
   const getAiInsights = async () => {
     if (posts.length === 0) return;
     setLoadingInsights(true);
@@ -648,12 +710,12 @@ export default function LenIA() {
     } catch { setAiInsights({ error:true }); }
     finally { setLoadingInsights(false); }
   };
-
+ 
   const totalReach = posts.reduce((s,p) => s+Number(p.reach||0), 0);
   const totalLikes = posts.reduce((s,p) => s+Number(p.likes||0), 0);
   const avgEng = posts.length ? (posts.reduce((s,p) => s+Number(p.likes||0)+Number(p.comments||0)+Number(p.saves||0)+Number(p.shares||0), 0)/posts.length).toFixed(0) : 0;
   const topPost = posts.length ? posts.reduce((best,p) => (Number(p.likes||0)+Number(p.comments||0)+Number(p.saves||0)) > (Number(best.likes||0)+Number(best.comments||0)+Number(best.saves||0)) ? p : best) : null;
-
+ 
   // ── HELPERS ──
   const ScoreBar = ({ score }) => (
     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -676,7 +738,7 @@ export default function LenIA() {
       <input type="number" min="0" style={{ ...S.briefInput, padding:"8px 12px" }} value={postDraft[field]||""} onChange={e => setPostDraft(d=>({...d,[field]:e.target.value}))} />
     </div>
   );
-
+ 
   // ── LOGIN SCREEN ──
   if (!userReady) {
     return (
@@ -693,21 +755,47 @@ export default function LenIA() {
           <div style={{ fontFamily:"'Playfair Display',serif", fontSize:30, fontWeight:900, background:"linear-gradient(135deg,#E8354A 0%,#7B4FA0 60%,#2BB5AE 100%)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", letterSpacing:"-0.02em" }}>LEN-IA</div>
           <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:16, fontStyle:"italic", color:"#aaa", marginTop:-10 }}>by Collettivo LEN</div>
           <div style={{ width:"100%", height:1, background:"linear-gradient(90deg,transparent,#E8354A44,transparent)" }} />
-          <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#888", textAlign:"center" }}>Chi sei? Inserisci il tuo nome per accedere al tuo profilo.</div>
-          <input style={{ ...S.briefInput, textAlign:"center", fontSize:15 }} placeholder="es. Marta, Lorenzo, Sara…" value={userInput} onChange={e=>setUserInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") loginUser(); }} autoFocus />
-          <button className="brief-save-btn" onClick={loginUser} disabled={!userInput.trim()||loadingUser} style={{ ...S.saveBtn, width:"100%", padding:"12px", fontSize:14, opacity:!userInput.trim()||loadingUser?0.5:1 }} {...hov}>
-            {loadingUser ? "caricamento…" : "entra →"}
-          </button>
+ 
+          {!session?.user ? (
+            authStage === "sent" ? (
+              <>
+                <div style={{ fontSize:36 }}>📬</div>
+                <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#888", textAlign:"center" }}>
+                  Ti abbiamo mandato un link di accesso a <b>{authEmail}</b>. Aprilo da questo dispositivo per entrare.
+                </div>
+                <button className="clear-btn" style={S.clearBtn} onClick={()=>setAuthStage("idle")}>← usa un'altra email</button>
+              </>
+            ) : (
+              <>
+                <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#888", textAlign:"center" }}>Accedi con la tua email per entrare nel tool del collettivo.</div>
+                <input type="email" style={{ ...S.briefInput, textAlign:"center", fontSize:15 }} placeholder="la-tua-email@esempio.it" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") sendMagicLink(); }} autoFocus />
+                <button className="brief-save-btn" onClick={sendMagicLink} disabled={!authEmail.trim()||authLoading} style={{ ...S.saveBtn, width:"100%", padding:"12px", fontSize:14, opacity:!authEmail.trim()||authLoading?0.5:1 }} {...hov}>
+                  {authLoading ? "invio…" : "invia link di accesso →"}
+                </button>
+                <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#bbb", textAlign:"center" }}>Accesso solo su invito: se la tua email non è tra i membri del collettivo, chiedi a un admin di invitarti.</div>
+              </>
+            )
+          ) : profile && !profile.display_name ? (
+            <>
+              <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#888", textAlign:"center" }}>Ultimo passo: come vuoi essere chiamato nel tool?</div>
+              <input style={{ ...S.briefInput, textAlign:"center", fontSize:15 }} placeholder="es. Marta, Lorenzo, Sara…" value={nameDraft} onChange={e=>setNameDraft(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") confirmDisplayName(); }} autoFocus />
+              <button className="brief-save-btn" onClick={confirmDisplayName} disabled={!nameDraft.trim()||loadingUser} style={{ ...S.saveBtn, width:"100%", padding:"12px", fontSize:14, opacity:!nameDraft.trim()||loadingUser?0.5:1 }} {...hov}>
+                {loadingUser ? "caricamento…" : "entra →"}
+              </button>
+            </>
+          ) : (
+            <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#888" }}>caricamento del tuo profilo…</div>
+          )}
         </div>
       </div>
     );
   }
-
+ 
   // ── CALENDAR FUNCTIONS ──
   const CAL_COLORS = ["#E8354A","#7B4FA0","#2BB5AE"];
   const MONTHS_IT = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
   const DAYS_IT   = ["Lun","Mar","Mer","Gio","Ven","Sab","Dom"];
-
+ 
   const saveCalEvent = async () => {
     if (!calDraft.title.trim() || !selectedDay) return;
     const dateStr = `${calYear}-${String(calMonth+1).padStart(2,"0")}-${String(selectedDay).padStart(2,"0")}`;
@@ -723,12 +811,12 @@ export default function LenIA() {
     setSelectedDay(null);
     setEditCalEvent(null);
   };
-
+ 
   const deleteCalEvent = async (id) => {
     await dbDelete("calendar_events", id);
     setCalEvents(p => p.filter(e => e.id !== id));
   };
-
+ 
   const getDaysInMonth = (y, m) => new Date(y, m+1, 0).getDate();
   const getFirstDayOfMonth = (y, m) => { const d = new Date(y, m, 1).getDay(); return d===0?6:d-1; };
   const eventsForDay = (day) => {
@@ -736,7 +824,7 @@ export default function LenIA() {
     return calEvents.filter(e => e.date === dateStr || e.event_date === dateStr);
   };
   const platformColor = (p) => p==="Instagram"?"#E8354A":p==="Facebook"?"#1877F2":"#7B4FA0";
-
+ 
   // ── CALENDAR PANEL ──
   const LiveSessionPanel = () => {
     if (!activeLive) {
@@ -805,13 +893,13 @@ export default function LenIA() {
             <textarea style={S.textarea} rows={1} placeholder="Scrivi al gruppo…" value={liveInput}
               onChange={e => setLiveInput(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendLiveMessage(); } }} />
-            <button className="send-btn" style={{ ...S.sendBtn, background:"linear-gradient(135deg,#0EA5E9,#2BB5AE)", color:"#fff" }} disabled={liveLoading || !liveInput.trim()} onClick={sendLiveMessage} {...hov}>→</button>
+            <button className="send-btn" style={{ ...S.sendBtn, background:"linear-gradient(135deg,#0EA5E9,#2BB5AE)", color:"#fff" }} disabled={liveLoading || !liveInput.trim() || !canWrite} title={!canWrite?"Il tuo ruolo è sola lettura":""} onClick={sendLiveMessage} {...hov}>→</button>
           </div>
         </div>
       </div>
     );
   };
-
+ 
   const CalendarPanel = () => {
     const daysInMonth = getDaysInMonth(calYear, calMonth);
     const firstDay    = getFirstDayOfMonth(calYear, calMonth);
@@ -821,7 +909,7 @@ export default function LenIA() {
     const noteRef     = useRef(null);
     const platformRef = useRef(null);
     const formatRef   = useRef(null);
-
+ 
     const handleSave = async () => {
       const title = titleRef.current?.value?.trim();
       if (!title || !selectedDay) return;
@@ -837,7 +925,7 @@ export default function LenIA() {
       setSelectedDay(null);
       setEditCalEvent(null);
     };
-
+ 
     return (
       <div style={{ flex:1, overflowY:"auto", padding:"28px", maxWidth:960, width:"100%", margin:"0 auto" }}>
         {/* Header */}
@@ -852,12 +940,12 @@ export default function LenIA() {
             <button className="clear-btn" style={S.clearBtn} onClick={()=>{ if(calMonth===11){setCalMonth(0);setCalYear(y=>y+1);}else{setCalMonth(m=>m+1);} }}>→</button>
           </div>
         </div>
-
+ 
         {/* Day headers */}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4, marginBottom:4 }}>
           {DAYS_IT.map(d => <div key={d} style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, fontWeight:700, color:"#bbb", textAlign:"center", letterSpacing:"0.08em", textTransform:"uppercase", padding:"4px 0" }}>{d}</div>)}
         </div>
-
+ 
         {/* Calendar grid */}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4 }}>
           {Array.from({ length: firstDay }).map((_,i) => <div key={`e${i}`} />)}
@@ -882,7 +970,7 @@ export default function LenIA() {
             );
           })}
         </div>
-
+ 
         {/* Quick add form — uncontrolled inputs to avoid re-render flickering */}
         {selectedDay && (
           <div style={{ marginTop:16, background:"var(--surface)", border:"1.5px solid rgba(123,79,160,0.25)", borderRadius:14, padding:"18px 22px", animation:"slideUp 0.25s cubic-bezier(0.22,1,0.36,1)" }}>
@@ -917,7 +1005,7 @@ export default function LenIA() {
             </div>
           </div>
         )}
-
+ 
         {/* Legend */}
         <div style={{ display:"flex", gap:16, marginTop:16, flexWrap:"wrap" }}>
           {[["#E8354A","1° post del giorno"],["#7B4FA0","2° post del giorno"],["#2BB5AE","3° post del giorno"]].map(([c,l])=>(
@@ -930,7 +1018,7 @@ export default function LenIA() {
       </div>
     );
   };
-
+ 
   // ── ANALYTICS PANEL ──
   const AnalyticsPanel = () => (
     <div style={{ flex:1, overflowY:"auto", padding:"28px", maxWidth:900, width:"100%", margin:"0 auto" }}>
@@ -1020,7 +1108,7 @@ export default function LenIA() {
       )}
     </div>
   );
-
+ 
   return (
     <div data-theme={dark?"dark":"light"} style={S.root}>
       <style>{css}</style>
@@ -1030,7 +1118,7 @@ export default function LenIA() {
         {[0,1,2,3,4,5,6].map(i => <div key={i} ref={el=>cursorTrailRefs.current[i]=el} style={{ position:"fixed", left:-100, top:-100, borderRadius:"50%", background:"#E8354A", transform:"translate(-50%,-50%)", pointerEvents:"none", zIndex:99998, width:8, height:8, opacity:0 }} />)}
       </>}
       <div style={S.bgNoise} /><div style={S.bgA1} /><div style={S.bgA2} />
-
+ 
       {showHistory && (
         <div style={S.drawerOverlay} onClick={()=>setShowHistory(false)}>
           <div style={S.drawer} onClick={e=>e.stopPropagation()}>
@@ -1060,7 +1148,43 @@ export default function LenIA() {
           </div>
         </div>
       )}
-
+ 
+      {showTeam && (
+        <div style={S.drawerOverlay} onClick={()=>setShowTeam(false)}>
+          <div style={S.drawer} onClick={e=>e.stopPropagation()}>
+            <div style={S.drawerHeader}>
+              <span style={S.drawerTitle}>👥 Team del Collettivo</span>
+              <button className="clear-btn" style={{ ...S.clearBtn, fontSize:12 }} onClick={()=>setShowTeam(false)} {...hov}>✕ chiudi</button>
+            </div>
+            {teamProfiles.length===0 ? (
+              <div style={S.drawerEmpty}><div style={{ fontSize:36, marginBottom:12 }}>👤</div><p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#bbb" }}>Nessun membro trovato.</p></div>
+            ) : (
+              <div style={S.drawerList}>
+                {teamProfiles.map(p => (
+                  <div key={p.id} style={S.drawerItem}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 }}>
+                      <div>
+                        <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight:700 }}>{p.display_name || "(nome non impostato)"}</div>
+                        <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#aaa" }}>{p.id===profile?.id ? "tu" : p.id.slice(0,8)}</div>
+                      </div>
+                      <select value={p.role} onChange={e=>changeRole(p.id, e.target.value)} disabled={p.id===profile?.id} style={{ ...S.briefInput, padding:"6px 10px", fontSize:12, width:"auto" }}>
+                        <option value="admin">admin</option>
+                        <option value="membro">membro</option>
+                        <option value="ospite">ospite</option>
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ padding:"14px 20px", fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#aaa" }}>
+              Per invitare un nuovo membro: Supabase → Authentication → Users → Invite user, con la sua email.
+            </div>
+          </div>
+        </div>
+      )}
+ 
+ 
       {showBSessions && (
         <div style={S.drawerOverlay} onClick={()=>setShowBSessions(false)}>
           <div style={S.drawer} onClick={e=>e.stopPropagation()}>
@@ -1092,7 +1216,7 @@ export default function LenIA() {
           </div>
         </div>
       )}
-
+ 
       <header style={S.header}>
         <div style={S.headerInner}>
           <div style={S.logo}>
@@ -1116,11 +1240,13 @@ export default function LenIA() {
               📅 calendario
             </button>
             <button className="clear-btn" onClick={()=>setDark(d=>!d)} title={dark?"Passa alla modalità chiara":"Passa alla modalità scura"} style={S.clearBtn} {...hov}>{dark?"☀️ chiaro":"🌙 scuro"}</button>
+            {role==="admin" && <button className="clear-btn" onClick={openTeamPanel} style={S.clearBtn} {...hov}>👥 team</button>}
+            <button className="clear-btn" onClick={logout} style={S.clearBtn} {...hov}>esci</button>
             {mode!=="analytics" && mode!=="calendar" && mode!=="live" && <button className="clear-btn" onClick={clearChat} style={S.clearBtn} {...hov}>↺ reset</button>}
           </div>
         </div>
       </header>
-
+ 
       {showBrief && (
         <div style={S.briefPanel}>
           <div style={S.briefInner}>
@@ -1140,11 +1266,11 @@ export default function LenIA() {
           </div>
         </div>
       )}
-
+ 
       <div style={S.modeBar}>
         {MODES.filter(m=>m.id!=="calendar").map(m => <button key={m.id} className="mode-btn" onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id?{ background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }:{ color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
       </div>
-
+ 
       {mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : mode==="live" ? LiveSessionPanel() : (
         <>
           {mode !== "brainstorm" && (
@@ -1165,7 +1291,7 @@ export default function LenIA() {
               </div>
             </div>
           )}
-
+ 
           <div style={S.chat}>
             {messages.length===0 && (
               <div style={S.emptyState}>
@@ -1264,7 +1390,7 @@ export default function LenIA() {
             )}
             <div ref={bottomRef} />
           </div>
-
+ 
           <div style={{ ...S.inputArea, background:`${currentMode.color}10`, borderTop:`2px solid ${currentMode.color}33` }}>
             {attachments.length > 0 && (
               <div style={{ maxWidth:860, margin:"0 auto 10px", display:"flex", gap:8, flexWrap:"wrap" }}>
@@ -1295,7 +1421,7 @@ export default function LenIA() {
                                         "Scrivi qui..."
                 }
                 rows={3} />
-              <button className="send-btn" onClick={()=>sendMessage()} disabled={(!input.trim()&&!attachments.length)||loading} style={{ ...S.sendBtn, background:(!input.trim()&&!attachments.length)||loading?"#e8e4df":currentMode.color, color:(!input.trim()&&!attachments.length)||loading?"#bbb":"#fff" }} {...hov}>↑</button>
+              <button className="send-btn" onClick={()=>sendMessage()} disabled={(!input.trim()&&!attachments.length)||loading||!canWrite} title={!canWrite?"Il tuo ruolo è sola lettura":""} style={{ ...S.sendBtn, background:(!input.trim()&&!attachments.length)||loading||!canWrite?"#e8e4df":currentMode.color, color:(!input.trim()&&!attachments.length)||loading?"#bbb":"#fff" }} {...hov}>↑</button>
             </div>
             <p style={{ maxWidth:860, margin:"8px auto 0", fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#ccc", letterSpacing:"0.08em" }}>enter per inviare · shift+enter per andare a capo</p>
           </div>
@@ -1304,7 +1430,7 @@ export default function LenIA() {
     </div>
   );
 }
-
+ 
 const css = `
   [data-theme="light"] { --bg:#FAFAF8; --surface:#fff; --surface2:#FAFAF8; --text:#1a1a1a; --text2:#333; --border:rgba(0,0,0,0.07); --border2:rgba(0,0,0,0.12); --track:#f0ede8; --glass:rgba(250,250,248,0.92); --glass2:rgba(255,255,255,0.85); color-scheme: light; }
   [data-theme="dark"]  { --bg:#111114; --surface:#1d1d22; --surface2:#17171b; --text:#f2efea; --text2:#e2dfd9; --border:rgba(255,255,255,0.10); --border2:rgba(255,255,255,0.18); --track:#2a2a30; --glass:rgba(17,17,20,0.92); --glass2:rgba(24,24,28,0.85); color-scheme: dark; }
@@ -1340,7 +1466,7 @@ const css = `
   .cal-day:hover { transform: scale(1.02) !important; box-shadow: 0 4px 16px rgba(0,0,0,0.08) !important; }
   textarea:focus, input:focus, select:focus { outline: none !important; border-color: #E8354A !important; box-shadow: 0 0 0 3px rgba(232,53,74,0.1) !important; }
 `;
-
+ 
 const S = {
   root: { fontFamily:"'DM Sans',sans-serif", background:"var(--bg)", minHeight:"100vh", display:"flex", flexDirection:"column", position:"relative", overflow:"hidden", color:"var(--text)" },
   bgNoise: { position:"fixed", inset:0, backgroundImage:`url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E")`, pointerEvents:"none", zIndex:0, opacity:0.4 },
