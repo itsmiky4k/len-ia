@@ -292,7 +292,7 @@ export default function LenIA() {
     const email = authEmail.trim();
     if (!email) return;
     setAuthLoading(true);
-    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: typeof window!=="undefined" ? window.location.origin : undefined } });
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: typeof window!=="undefined" ? window.location.origin : undefined, shouldCreateUser:false } });
     setAuthLoading(false);
     if (error) { alert("Errore invio link: " + error.message); return; }
     setAuthStage("sent");
