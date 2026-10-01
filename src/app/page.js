@@ -1139,6 +1139,7 @@ const removeAttachment = (idx) => {
                       </div>
                       <select value={p.role} onChange={e=>changeRole(p.id, e.target.value)} disabled={p.id===profile?.id} style={{ ...S.briefInput, padding:"6px 10px", fontSize:12, width:"auto" }}>
                         <option value="admin">admin</option>
+                        <option value="editor">editor</option>
                         <option value="membro">membro</option>
                         <option value="ospite">ospite</option>
                       </select>
