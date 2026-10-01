@@ -4,55 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { uploadAttachment, deleteAttachment, toBlock, resolveMessages, stripOldAttachments, MAX_FILES_PER_MESSAGE } from "../lib/attachments";
  
-// ─── SYSTEM PROMPTS ──────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `Sei LEN-IA, la Social Media Manager AI del Collettivo LEN — un collettivo di artisti giovani, pop, freschi ed esplosivi. Il tuo tono è energico, diretto, creativo e mai noioso. Parli come una persona vera, non come un robot corporate.
- 
-Puoi fare queste cose:
-1. Scrivere caption per Instagram e Facebook.
-2. Suggerire hashtag: un mix strategico di hashtag di nicchia, community e trending.
-3. Pianificare contenuti / calendario editoriale: piani editoriali con idee fresche.
-4. Reels & Stories: script, hook, overlay text e sticker copy per il formato verticale.
- 
-Tono: pop, giovane, autentico, un po' ironico quando serve. Mescola italiano e inglese. Zero corporate-speak.
-Rispondi sempre in italiano (con qualche parola inglese se ci sta bene).`;
- 
-const ANALYSIS_SYSTEM = `Sei un esperto di copywriting e social media marketing. Analizza la caption che ti viene fornita e rispondi SOLO con un JSON valido, senza markdown, senza backtick, senza testo aggiuntivo. Il JSON deve avere esattamente questa struttura:
-{"voto":<numero 1-10>,"giudizio":"<frase sintetica>","punti_forza":["<p1>","<p2>"],"punti_deboli":["<p1>","<p2>"],"caption_ottimizzata":"<caption riscritta>"}`;
- 
-const BRAINSTORM_SYSTEM = `Sei LEN-IA in modalita Brainstorming — il consulente creativo del Collettivo LEN. Qui sei libero da schemi fissi: non devi produrre caption, hashtag o script, ma ragionare insieme al team su idee, direzioni creative, concept, identita, temi, campagne, collaborazioni, strategie.
- 
-Il tuo ruolo e' quello di un art director e consulente di comunicazione che conosce benissimo il collettivo. Fai domande, proponi angolazioni inaspettate, sfida le idee, suggerisci connessioni tra concetti. Sii provocatorio quando serve, poetico quando e' giusto, pratico quando necessario.
- 
-Alla fine di ogni risposta, se ha senso, proponi 1-3 "prossimi passi concreti" che l'utente puo' portare nelle altre tab (Caption, Hashtag, Calendario, Reels) — preceduti dalla dicitura "→ PORTA NELLE ALTRE TAB:".
- 
-Tono: da collega creativo, non da assistente. Parla come un membro del team.`;
- 
- 
-const REELS_SYSTEM = `Sei LEN-IA in modalita Video — il tuo assistente per la produzione video del Collettivo LEN. Non sei solo uno script writer: sei un direttore creativo video che guida il team dalla pre-produzione alla post-produzione.
- 
-Per ogni richiesta fornisci:
-- CONCEPT: idea visiva e narrativa del video
-- STORYBOARD: sequenza delle scene con descrizione visiva dettagliata
-- RIPRESE: consigli tecnici pratici (angolazioni, movimenti camera, luce, location)
-- HOOK: il primo secondo che cattura l'attenzione
-- TESTO A SCHERMO: overlay text, titoli, didascalie
-- AUDIO: suggerimenti per musica, sound design, voiceover
-- MONTAGGIO: ritmo, transizioni, durata consigliata
-- TRUCCHI & TIPS: consigli pro per massimizzare l'engagement video
- 
-Tono: pratico e creativo. Dai consigli che un vero videomaker darebbe al team.
-Rispondi sempre in italiano.`;
- 
-const ANALYTICS_SYSTEM = `Sei un esperto di social media analytics. Analizza i dati dei post forniti e rispondi SOLO con un JSON valido, senza markdown, senza backtick. Struttura:
-{"sintesi":"<2-3 frasi su trend generale>","top_post":{"motivo":"<perche ha performato bene>"},"bottom_post":{"motivo":"<perche ha performato peggio>"},"consigli":["<consiglio 1>","<consiglio 2>","<consiglio 3>"],"best_giorno":"<giorno della settimana con piu engagement>","best_formato":"<formato che performa meglio>"}`;
- 
-const LIVE_SYSTEM = `Sei LEN-IA in modalità Sessione Live — partecipi a una conversazione di gruppo con più membri del Collettivo LEN contemporaneamente, in tempo reale (es. durante una riunione o una sessione di progettazione condivisa).
- 
-Ogni messaggio è preceduto dal nome di chi lo scrive (es. "Marco: ..."), così puoi distinguere chi dice cosa e rivolgerti alle persone per nome quando serve.
- 
-Il tuo ruolo è facilitare la discussione di gruppo: fai da assistente creativo condiviso, riassumi quando la conversazione si allarga, evidenzia punti di accordo o disaccordo tra i membri, e proponi sintesi o prossimi passi concreti quando la discussione lo richiede.
- 
-Tono: collaborativo, diretto, mai robotico, coerente con lo spirito pop ed energico del collettivo. Rispondi sempre in italiano.`;
+// I prompt dell'AI stanno sul server: src/lib/prompts.js (usati da /api/chat).
  
 const MODES = [
   { id: "brainstorm", label: "💡 Brainstorm",  desc: "Consulente creativo libero da schemi",    color: "#E8354A" },
@@ -439,7 +391,7 @@ const [uploading, setUploading] = useState(false);
         else merged.push({ ...m });
       }
       while (merged.length && merged[0].role !== "user") merged.shift();
-      const data = await callAI({ model:"claude-sonnet-5", max_tokens:1200, system:LIVE_SYSTEM, messages:merged });
+      const data = await callAI({ mode:"live", messages:merged });
       const reply = (data?.content || []).filter(b => b.type === "text").map(b => b.text).join("\n") || `⚠️ Errore API: ${data?.error?.message || JSON.stringify(data)}`;
       await supabase.from("shared_messages").insert({ session_id: activeLive.id, sender_name: "LEN-IA", role: "assistant", content: reply });
     } catch (e) {
@@ -501,19 +453,6 @@ const [uploading, setUploading] = useState(false);
     },
   };
  
-  const buildSystemPrompt = () => {
-    if (mode === "brainstorm") return BRAINSTORM_SYSTEM;
-    if (mode === "reels") return REELS_SYSTEM;
-    let extra = "";
-    if (brief.tones.length > 0 || brief.keywords || brief.examples) {
-      extra += "\n\n--- BRIEF DI STILE ---";
-      if (brief.tones.length > 0) extra += `\nTono: ${brief.tones.join(", ")}`;
-      if (brief.keywords) extra += `\nKeyword: ${brief.keywords}`;
-      if (brief.examples) extra += `\nEsempi: ${brief.examples}`;
-      extra += "\n\nUSA QUESTO BRIEF come guida principale.";
-    }
-    return SYSTEM_PROMPT + extra;
-  };
   const hasBrief = brief.tones.length > 0 || brief.keywords.trim() || brief.examples.trim();
  
   const getModePrompt = () => {
@@ -582,7 +521,7 @@ const removeAttachment = (idx) => {
     }
     setLoading(true);
     try {
-      const data = await callAI({ model:"claude-sonnet-5", max_tokens:1500, system:buildSystemPrompt(), messages:trimmedHistory });
+      const data = await callAI({ mode, brief:{ tones:brief.tones, keywords:brief.keywords, examples:brief.examples }, messages:trimmedHistory });
       if (data.error) throw new Error(data.error.message || "API error");
       const text = data.content?.map(b => b.text||"").join("") || "Errore.";
       const newAssistantMsg = { role:"assistant", content:text, mode, platform };
@@ -610,7 +549,7 @@ const removeAttachment = (idx) => {
   const analyzeCaption = async (msgIndex, text) => {
     setAnalyzing(msgIndex);
     try {
-      const data = await callAI({ model:"claude-sonnet-5", max_tokens:1000, system:ANALYSIS_SYSTEM, messages:[{ role:"user", content:`Analizza questa caption:\n\n${text}` }] });
+      const data = await callAI({ mode:"caption_analysis", messages:[{ role:"user", content:`Analizza questa caption:\n\n${text}` }] });
       const raw = data.content?.map(b => b.text||"").join("") || "{}";
       setAnalyses(prev => ({ ...prev, [msgIndex]: JSON.parse(raw.replace(/```json|```/g,"").trim()) }));
     } catch { setAnalyses(prev => ({ ...prev, [msgIndex]:{ error:true } })); }
@@ -674,7 +613,7 @@ const removeAttachment = (idx) => {
     setLoadingInsights(true);
     try {
       const summary = posts.map(p => `Data: ${p.date} | Piattaforma: ${p.platform} | Formato: ${p.format} | Reach: ${p.reach} | Impressioni: ${p.impressions} | Like: ${p.likes} | Commenti: ${p.comments} | Salvataggi: ${p.saves} | Condivisioni: ${p.shares} | Delta follower: ${p.followers_delta} | Hashtag: ${p.hashtags||"n/d"} | Caption: ${p.caption||"n/d"}`).join("\n");
-      const data = await callAI({ model:"claude-sonnet-5", max_tokens:1000, system:ANALYTICS_SYSTEM, messages:[{ role:"user", content:`Analizza questi dati di ${posts.length} post:\n\n${summary}` }] });
+      const data = await callAI({ mode:"analytics", messages:[{ role:"user", content:`Analizza questi dati di ${posts.length} post:\n\n${summary}` }] });
       const raw = data.content?.map(b => b.text||"").join("") || "{}";
       setAiInsights(JSON.parse(raw.replace(/```json|```/g,"").trim()));
     } catch { setAiInsights({ error:true }); }
