@@ -1,12 +1,16 @@
 // src/app/api/chat/route.js
 // Proxy verso l'API Anthropic, blindato:
-//  - richiede login Supabase e blocca il ruolo "ospite"
-//  - modello e max_tokens decisi dal server (il client non li controlla)
-//  - accetta solo i campi system / messages / max_tokens
+//  - richiede login Supabase
+//  - il client manda solo la "mode" (brainstorm, caption, ...): prompt e max_tokens
+//    li decide il server, e il ruolo dell'utente deve poter usare quella mode
+//  - modello deciso dal server (variabile ANTHROPIC_MODEL)
+//  - accetta solo i campi mode / brief / messages
 //  - allegati ammessi solo come URL firmati del TUO bucket Supabase "attachments"
 //  - rate limit "best effort" per utente
  
 import { createClient } from "@supabase/supabase-js";
+import { canUseMode } from "../../../lib/roles";
+import { buildSystem, MODE_MAX_TOKENS } from "../../../lib/prompts";
  
 export const maxDuration = 60; // secondi (Vercel)
  
@@ -18,7 +22,6 @@ const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5";
 const MAX_TOKENS_CAP = Number(process.env.MAX_TOKENS_CAP) || 2000;
  
 const MAX_MESSAGES = 30;
-const MAX_SYSTEM_CHARS = 12000;
 const MAX_TEXT_CHARS = 60000;
 const MAX_ATTACHMENTS = 10;
 const RATE_LIMIT_PER_MIN = 20;
@@ -105,24 +108,24 @@ export async function POST(req) {
     if (authError || !user) fail(401, "Non autenticato");
  
     const { data: profile } = await db.from("profiles").select("role").eq("id", user.id).single();
-    if (!profile || profile.role === "ospite") fail(403, "Il tuo ruolo non permette di usare LEN-IA");
+    if (!profile) fail(403, "Profilo non trovato");
  
     if (rateLimited(user.id)) fail(429, "Troppe richieste, riprova tra un minuto");
  
     const body = await req.json().catch(() => fail(400, "JSON non valido"));
  
-    if (body.system !== undefined && (typeof body.system !== "string" || body.system.length > MAX_SYSTEM_CHARS)) {
-      fail(400, "System prompt non valido");
-    }
-    const requested = parseInt(body.max_tokens, 10);
-    const maxTokens = Math.min(Math.max(Number.isFinite(requested) ? requested : 1000, 1), MAX_TOKENS_CAP);
+    // modalità richiesta: deve esistere ed essere permessa al ruolo di chi chiama
+    const mode = body.mode;
+    const system = typeof mode === "string" ? buildSystem(mode, body.brief) : null;
+    if (!system) fail(400, "Modalità non valida");
+    if (!canUseMode(profile.role, mode)) fail(403, "Il tuo ruolo non può usare questa funzione");
  
     const payload = {
       model: MODEL,
-      max_tokens: maxTokens,
+      max_tokens: Math.min(MODE_MAX_TOKENS[mode] || 1000, MAX_TOKENS_CAP),
+      system,
       messages: cleanMessages(body.messages),
     };
-    if (body.system) payload.system = body.system;
  
     const upstream = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
