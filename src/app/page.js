@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { uploadAttachment, deleteAttachment, toBlock, resolveMessages, stripOldAttachments, MAX_FILES_PER_MESSAGE } from "../lib/attachments";
+import { normalizeRole, canAccessTab, canWrite as roleCanWrite } from "../lib/roles";
  
 // I prompt dell'AI stanno sul server: src/lib/prompts.js (usati da /api/chat).
  
@@ -72,8 +73,8 @@ export default function LenIA() {
   const [nameDraft, setNameDraft]     = useState("");
   const [showTeam, setShowTeam]       = useState(false);
   const [teamProfiles, setTeamProfiles] = useState([]);
-  const role = profile?.role || "membro";
-  const canWrite = role !== "ospite";
+  const role = normalizeRole(profile?.role);
+  const canWrite = roleCanWrite(role);
   const [loadingUser, setLoadingUser] = useState(false);
  
   // Dark mode
@@ -89,6 +90,11 @@ export default function LenIA() {
  
   // Chat
   const [mode, setMode]         = useState("caption");
+  // tab non permessa dal ruolo (es. membro su Caption) -> sposta su una permessa
+  useEffect(() => {
+    if (!profile) return;
+    if (!canAccessTab(role, mode)) setMode(role === "ospite" ? "live" : "brainstorm");
+  }, [profile, role, mode]);
   const [platform, setPlatform] = useState("Instagram");
   const [input, setInput]       = useState("");
   const [messages, setMessages] = useState([]);
@@ -349,6 +355,7 @@ const [uploading, setUploading] = useState(false);
   const genLiveCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
  
   const createLiveSession = async (title) => {
+    if (!canWrite) { alert("Il tuo ruolo è sola lettura: non puoi creare una stanza."); return; }
     const code = genLiveCode();
     const { data, error } = await supabase
       .from("shared_sessions")
@@ -1134,21 +1141,29 @@ const removeAttachment = (idx) => {
             <div><div style={S.logoMain}>LEN-IA</div><div style={S.logoSub}>by Collettivo LEN · {userName}</div></div>
           </div>
           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            {canAccessTab(role, "brainstorm") && (
             <button className="clear-btn" onClick={()=>setShowHistory(true)} style={{ ...S.clearBtn, borderColor:savedItems.length>0?"#7B4FA0":"var(--border2)", color:savedItems.length>0?"#7B4FA0":"#999", position:"relative" }} {...hov}>
               {savedItems.length>0 && <span style={{ position:"absolute", top:3, right:3, width:6, height:6, borderRadius:"50%", background:"#7B4FA0" }} />}
               💾 storico{savedItems.length>0?` (${savedItems.length})`:""}
             </button>
+            )}
+            {canAccessTab(role, "brainstorm") && (
             <button className="clear-btn" onClick={()=>setShowBSessions(true)} style={{ ...S.clearBtn, borderColor:bSessions.length>0?"#E8354A":"var(--border2)", color:bSessions.length>0?"#E8354A":"#999", position:"relative" }} {...hov}>
               {bSessions.length>0 && <span style={{ position:"absolute", top:3, right:3, width:6, height:6, borderRadius:"50%", background:"#E8354A" }} />}
               💡 sessioni{bSessions.length>0?` (${bSessions.length})`:""}
             </button>
+            )}
+            {canAccessTab(role, "caption") && (
             <button className="clear-btn" onClick={()=>setShowBrief(b=>!b)} style={{ ...S.clearBtn, borderColor:hasBrief?"#E8354A":"var(--border2)", color:hasBrief?"#E8354A":"#999", position:"relative" }} {...hov}>
               {hasBrief && <span style={{ position:"absolute", top:3, right:3, width:6, height:6, borderRadius:"50%", background:"#E8354A" }} />}
               🎨 brief
             </button>
+            )}
+            {canAccessTab(role, "calendar") && (
             <button className="clear-btn" onClick={()=>setMode(mode==="calendar"?"caption":"calendar")} style={{ ...S.clearBtn, borderColor:mode==="calendar"?"#7B4FA0":"var(--border2)", color:mode==="calendar"?"#7B4FA0":"#999" }} {...hov}>
               📅 calendario
             </button>
+            )}
             <button className="clear-btn" onClick={()=>setDark(d=>!d)} title={dark?"Passa alla modalità chiara":"Passa alla modalità scura"} style={S.clearBtn} {...hov}>{dark?"☀️ chiaro":"🌙 scuro"}</button>
             {role==="admin" && <button className="clear-btn" onClick={openTeamPanel} style={S.clearBtn} {...hov}>👥 team</button>}
             <button className="clear-btn" onClick={logout} style={S.clearBtn} {...hov}>esci</button>
@@ -1178,10 +1193,10 @@ const removeAttachment = (idx) => {
       )}
  
       <div style={S.modeBar}>
-        {MODES.filter(m=>m.id!=="calendar").map(m => <button key={m.id} className="mode-btn" onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id?{ background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }:{ color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
+        {MODES.filter(m=>m.id!=="calendar" && canAccessTab(role, m.id)).map(m => <button key={m.id} className="mode-btn" onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id?{ background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }:{ color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
       </div>
  
-      {mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : mode==="live" ? LiveSessionPanel() : (
+      {!canAccessTab(role, mode) ? null : mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : mode==="live" ? LiveSessionPanel() : (
         <>
           {mode !== "brainstorm" && (
             <div style={S.platformBar}>
@@ -1211,7 +1226,7 @@ const removeAttachment = (idx) => {
                 <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:14, color:"#aaa", lineHeight:1.8 }}>Scegli una modalita, usa i prompt suggeriti,<br />o scrivi direttamente cosa ti serve.</p>
                 <div style={{ width:40, height:2, background:"linear-gradient(90deg,#E8354A,#2BB5AE)", borderRadius:2, margin:"6px 0" }} />
                 <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:"center" }}>
-                  {MODES.filter(m=>m.id!=="analytics").map(m => <button key={m.id} className="quick-chip" onClick={()=>setMode(m.id)} style={{ ...S.chip, borderColor:`${m.color}55`, color:m.color, background:`${m.color}08` }} {...hov}>{m.label}</button>)}
+                  {MODES.filter(m=>m.id!=="analytics" && canAccessTab(role, m.id)).map(m => <button key={m.id} className="quick-chip" onClick={()=>setMode(m.id)} style={{ ...S.chip, borderColor:`${m.color}55`, color:m.color, background:`${m.color}08` }} {...hov}>{m.label}</button>)}
                 </div>
               </div>
             )}
@@ -1253,7 +1268,7 @@ const removeAttachment = (idx) => {
                             {(msg.mode==="caption"||msg.mode==="reels") && !analysis && <button className="copy-btn" style={{ ...S.copyBtn, color:"#2BB5AE" }} onClick={()=>analyzeCaption(i,msg.content)} disabled={analyzing===i} {...hov}>{analyzing===i?"⏳ analisi in corso…":"📊 analizza"}</button>}
                           </div>
                         )}
-                        {msg.mode==="brainstorm" && (
+                        {msg.mode==="brainstorm" && canAccessTab(role, "caption") && (
                           <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:4 }}>
                             <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#bbb", letterSpacing:"0.08em", textTransform:"uppercase", alignSelf:"center" }}>porta in →</span>
                             {[
