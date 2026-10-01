@@ -2,6 +2,7 @@
 // LEN-IA v1.1 — fix cursor
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
+import { uploadAttachment, deleteAttachment, toBlock, resolveMessages, stripOldAttachments, MAX_FILES_PER_MESSAGE } from "../lib/attachments";
  
 // ─── SYSTEM PROMPTS ──────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `Sei LEN-IA, la Social Media Manager AI del Collettivo LEN — un collettivo di artisti giovani, pop, freschi ed esplosivi. Il tuo tono è energico, diretto, creativo e mai noioso. Parli come una persona vera, non come un robot corporate.
@@ -81,7 +82,9 @@ const authHeaders = async () => {
 };
 const callAI = async (body) => {
   const headers = { "Content-Type":"application/json", ...(await authHeaders()) };
-  const res = await fetch("/api/chat", { method:"POST", headers, body:JSON.stringify(body) });
+  // allegati vecchi -> segnaposto; riferimenti storage:// -> URL firmati freschi
+  const messages = await resolveMessages(stripOldAttachments(body.messages));
+  const res = await fetch("/api/chat", { method:"POST", headers, body:JSON.stringify({ ...body, messages }) });
   return res.json();
 };
 const dbGet = async (table, user) => {
@@ -175,8 +178,9 @@ export default function LenIA() {
   const [calDraft, setCalDraft]           = useState({ title:"", platform:"Instagram", format:"Post", note:"" });
   const [editCalEvent, setEditCalEvent]   = useState(null);
  
-  // Attachments (caption + brainstorm only)
-  const [attachments, setAttachments] = useState([]); // array of { base64, mediaType, name, preview }
+  // Attachments (tutte le tab chat) — file su Supabase Storage
+const [attachments, setAttachments] = useState([]); // array of { path, mediaType, name, preview, isPdf }
+const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
   const [isMobile, setIsMobile]   = useState(false);
   const isHoveringRef  = useRef(false);
@@ -520,66 +524,36 @@ export default function LenIA() {
     return "";
   };
  
-  const compressImage = (file) => new Promise((resolve) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const maxSize = 800;
-      let w = img.width, h = img.height;
-      if (w > maxSize || h > maxSize) {
-        if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
-        else { w = Math.round(w * maxSize / h); h = maxSize; }
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = w; canvas.height = h;
-      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-      const compressed = canvas.toDataURL("image/jpeg", 0.75);
-      URL.revokeObjectURL(url);
-      resolve(compressed);
-    };
-    img.src = url;
-  });
+const handleFileSelect = async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = "";
+  if (!files.length) return;
  
-  const handleFileSelect = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
-    const SIZE_THRESHOLD = 1 * 1024 * 1024; // 1MB
-    const newAttachments = await Promise.all(files.map(async (file) => {
-      if (file.type.startsWith("image/")) {
-        if (file.size > SIZE_THRESHOLD) {
-          // Comprimi solo se supera 1MB
-          const compressed = await compressImage(file);
-          const base64 = compressed.split(",")[1];
-          return { base64, mediaType:"image/jpeg", name:file.name, preview:compressed };
-        } else {
-          // Immagine già leggera, usa direttamente
-          return await new Promise((res) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const dataUrl = reader.result;
-              res({ base64: dataUrl.split(",")[1], mediaType:file.type, name:file.name, preview:dataUrl });
-            };
-            reader.readAsDataURL(file);
-          });
-        }
-      } else {
-        return await new Promise((res) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64 = reader.result.split(",")[1];
-            res({ base64, mediaType:file.type, name:file.name, preview:null });
-          };
-          reader.readAsDataURL(file);
-        });
-      }
-    }));
-    setAttachments(prev => [...prev, ...newAttachments]);
-    e.target.value = "";
-  };
+  const room = MAX_FILES_PER_MESSAGE - attachments.length;
+  if (room <= 0) { alert(`Massimo ${MAX_FILES_PER_MESSAGE} allegati per messaggio.`); return; }
+  if (files.length > room) alert(`Massimo ${MAX_FILES_PER_MESSAGE} allegati: aggiungo solo i primi ${room}.`);
+  const batch = files.slice(0, room);
+ 
+  setUploading(true);
+  const results = await Promise.allSettled(batch.map(uploadAttachment));
+  const ok = results.filter(r => r.status === "fulfilled").map(r => r.value);
+  const failed = results
+    .map((r, i) => r.status === "rejected" ? `${batch[i].name}: ${r.reason?.message || "errore"}` : null)
+    .filter(Boolean);
+  if (ok.length) setAttachments(prev => [...prev, ...ok]);
+  if (failed.length) alert("Alcuni file non sono stati caricati:\n" + failed.join("\n"));
+  setUploading(false);
+};
+ 
+const removeAttachment = (idx) => {
+  const att = attachments[idx];
+  setAttachments(p => p.filter((_, j) => j !== idx));
+  if (att?.path) deleteAttachment(att.path).catch(() => {});
+};
  
   const sendMessage = async (retryHistory = null) => {
     const isRetry = retryHistory !== null;
-    if (!isRetry && (!input.trim() && !attachments.length) || loading) return;
+    if (!isRetry && (!input.trim() && !attachments.length) || loading || uploading) return;
     const textPrompt = isRetry ? "" : getModePrompt() + (input.trim() || (attachments.length ? `Analizza questi file: ${attachments.map(a=>a.name).join(", ")}` : ""));
  
     let userApiContent;
@@ -587,11 +561,7 @@ export default function LenIA() {
  
     if (!isRetry) {
       if (attachments.length > 0) {
-        const fileBlocks = attachments.map(att =>
-          att.mediaType === "application/pdf"
-            ? { type:"document", source:{ type:"base64", media_type:"application/pdf", data:att.base64 } }
-            : { type:"image", source:{ type:"base64", media_type:att.mediaType, data:att.base64 } }
-        );
+        const fileBlocks = attachments.map(toBlock);
         userApiContent = [...fileBlocks, { type:"text", text:textPrompt }];
       } else {
         userApiContent = textPrompt;
@@ -1400,18 +1370,16 @@ export default function LenIA() {
                       ? <img src={att.preview} alt="preview" style={{ width:32, height:32, borderRadius:4, objectFit:"cover" }} />
                       : <span style={{ fontSize:16 }}>📎</span>}
                     <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"var(--text2)", maxWidth:100, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{att.name}</span>
-                    <button onClick={()=>setAttachments(p=>p.filter((_,j)=>j!==ai))} style={{ background:"transparent", border:"none", color:"#ccc", fontSize:14, cursor:"pointer", padding:0 }}>✕</button>
+                    <button onClick={()=>removeAttachment(ai)} style={{ background:"transparent", border:"none", color:"#ccc", fontSize:14, cursor:"pointer", padding:0 }}>✕</button>
                   </div>
                 ))}
               </div>
             )}
             <div style={S.inputWrapper}>
-              {(mode==="caption"||mode==="brainstorm") && (
-                <>
-                  <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple style={{ display:"none" }} onChange={handleFileSelect} />
-                  <button className="clear-btn" onClick={()=>fileInputRef.current?.click()} style={{ ...S.clearBtn, width:52, height:52, borderRadius:14, fontSize:20, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", padding:0, border:`1.5px solid ${currentMode.color}55`, color:currentMode.color }} {...hov} title="Allega immagini o PDF">+</button>
-                </>
-              )}
+              <>
+  <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple style={{ display:"none" }} onChange={handleFileSelect} />
+  <button className="clear-btn" disabled={uploading || attachments.length >= MAX_FILES_PER_MESSAGE} onClick={()=>fileInputRef.current?.click()} style={{ ...S.clearBtn, width:52, height:52, borderRadius:14, fontSize:20, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", padding:0, border:`1.5px solid ${currentMode.color}55`, color:currentMode.color, opacity:uploading?0.6:1 }} {...hov} title="Allega immagini o PDF">{uploading ? "…" : "+"}</button>
+</>
               <textarea style={{ ...S.textarea, border:`1.5px solid ${currentMode.color}55`, boxShadow:`0 2px 12px ${currentMode.color}15` }} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={handleKey}
                 placeholder={
                   mode==="caption"    ? "es. foto del backstage dell'ultima performance, mood underground..." :
@@ -1421,7 +1389,7 @@ export default function LenIA() {
                                         "Scrivi qui..."
                 }
                 rows={3} />
-              <button className="send-btn" onClick={()=>sendMessage()} disabled={(!input.trim()&&!attachments.length)||loading||!canWrite} title={!canWrite?"Il tuo ruolo è sola lettura":""} style={{ ...S.sendBtn, background:(!input.trim()&&!attachments.length)||loading||!canWrite?"#e8e4df":currentMode.color, color:(!input.trim()&&!attachments.length)||loading?"#bbb":"#fff" }} {...hov}>↑</button>
+              <button className="send-btn" onClick={()=>sendMessage()} disabled={(!input.trim()&&!attachments.length)||loading||uploading||!canWrite} title={!canWrite?"Il tuo ruolo è sola lettura":""} style={{ ...S.sendBtn, background:(!input.trim()&&!attachments.length)||loading||!canWrite?"#e8e4df":currentMode.color, color:(!input.trim()&&!attachments.length)||loading?"#bbb":"#fff" }} {...hov}>↑</button>
             </div>
             <p style={{ maxWidth:860, margin:"8px auto 0", fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#ccc", letterSpacing:"0.08em" }}>enter per inviare · shift+enter per andare a capo</p>
           </div>
@@ -1527,3 +1495,4 @@ const S = {
   textarea: { flex:1, background:"var(--surface)", border:"1.5px solid var(--border)", borderRadius:14, padding:"12px 18px", fontSize:13, fontFamily:"'DM Sans',sans-serif", color:"var(--text)", resize:"none", lineHeight:1.7, transition:"all 0.2s ease", boxShadow:"0 2px 8px rgba(0,0,0,0.04)" },
   sendBtn: { width:52, height:52, border:"none", borderRadius:14, fontSize:20, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, boxShadow:"0 4px 16px rgba(0,0,0,0.1)" },
 };
+ 
