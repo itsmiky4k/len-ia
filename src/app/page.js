@@ -178,7 +178,6 @@ export default function LenIA() {
   const [calDraft, setCalDraft]           = useState({ title:"", platform:"Instagram", format:"Post", note:"" });
   const [editCalEvent, setEditCalEvent]   = useState(null);
  
-  // Attachments (caption + brainstorm only)
   // Attachments (tutte le tab chat) — file su Supabase Storage
 const [attachments, setAttachments] = useState([]); // array of { path, mediaType, name, preview, isPdf }
 const [uploading, setUploading] = useState(false);
@@ -529,12 +528,12 @@ const handleFileSelect = async (e) => {
   const files = Array.from(e.target.files || []);
   e.target.value = "";
   if (!files.length) return;
-
+ 
   const room = MAX_FILES_PER_MESSAGE - attachments.length;
   if (room <= 0) { alert(`Massimo ${MAX_FILES_PER_MESSAGE} allegati per messaggio.`); return; }
   if (files.length > room) alert(`Massimo ${MAX_FILES_PER_MESSAGE} allegati: aggiungo solo i primi ${room}.`);
   const batch = files.slice(0, room);
-
+ 
   setUploading(true);
   const results = await Promise.allSettled(batch.map(uploadAttachment));
   const ok = results.filter(r => r.status === "fulfilled").map(r => r.value);
@@ -545,7 +544,7 @@ const handleFileSelect = async (e) => {
   if (failed.length) alert("Alcuni file non sono stati caricati:\n" + failed.join("\n"));
   setUploading(false);
 };
-
+ 
 const removeAttachment = (idx) => {
   const att = attachments[idx];
   setAttachments(p => p.filter((_, j) => j !== idx));
@@ -1496,3 +1495,4 @@ const S = {
   textarea: { flex:1, background:"var(--surface)", border:"1.5px solid var(--border)", borderRadius:14, padding:"12px 18px", fontSize:13, fontFamily:"'DM Sans',sans-serif", color:"var(--text)", resize:"none", lineHeight:1.7, transition:"all 0.2s ease", boxShadow:"0 2px 8px rgba(0,0,0,0.04)" },
   sendBtn: { width:52, height:52, border:"none", borderRadius:14, fontSize:20, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, boxShadow:"0 4px 16px rgba(0,0,0,0.1)" },
 };
+ 
