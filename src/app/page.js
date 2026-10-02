@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { uploadAttachment, deleteAttachment, toBlock, resolveMessages, stripOldAttachments, MAX_FILES_PER_MESSAGE } from "../lib/attachments";
 import { normalizeRole, canAccessTab, canWrite as roleCanWrite } from "../lib/roles";
+import BoardTab from "../components/BoardTab";
  
 // I prompt dell'AI stanno sul server: src/lib/prompts.js (usati da /api/chat).
  
@@ -14,6 +15,7 @@ const MODES = [
   { id: "reels",      label: "🎬 Video",       desc: "Assistente per la produzione video",       color: "#2BB5AE" },
   { id: "analytics",  label: "📈 Analytics",   desc: "Traccia e analizza i tuoi post",           color: "#E8354A" },
   { id: "live",       label: "📡 Live",        desc: "Sessione condivisa in tempo reale col team", color: "#0EA5E9" },
+  { id: "bacheca",    label: "📋 Bacheca",    desc: "Idee, proposte e progetti del collettivo", color: "#F07D2A" },
 ];
 const PLATFORMS   = ["Instagram", "Facebook", "Entrambi"];
 const TONE_OPTIONS = ["Ironico","Poetico","Diretto","Provocatorio","Caldo","Misterioso","Giocoso","Urgente"];
@@ -24,6 +26,7 @@ const CONTEXTUAL_CHIPS = {
   reels:      ["teaser nuovo brano","day in the life artista","behind the scenes live","time-lapse studio session","annuncio sorpresa","making of artwork"],
   analytics:  [],
   live:       [],
+  bacheca:    [],
 };
 const EMPTY_POST = { date:"", platform:"Instagram", format:"Post", caption:"", reach:0, impressions:0, likes:0, comments:0, saves:0, shares:0, followers_delta:0, hashtags:"" };
 const FORMATS = ["Post","Reel","Story","Carosello"];
@@ -90,6 +93,7 @@ export default function LenIA() {
  
   // Chat
   const [mode, setMode]         = useState("caption");
+  const [boardDraft, setBoardDraft] = useState(null); // idea portata da Brainstorm alla Bacheca
   // tab non permessa dal ruolo (es. membro su Caption) -> sposta su una permessa
   useEffect(() => {
     if (!profile) return;
@@ -1167,7 +1171,7 @@ const removeAttachment = (idx) => {
             <button className="clear-btn" onClick={()=>setDark(d=>!d)} title={dark?"Passa alla modalità chiara":"Passa alla modalità scura"} style={S.clearBtn} {...hov}>{dark?"☀️ chiaro":"🌙 scuro"}</button>
             {role==="admin" && <button className="clear-btn" onClick={openTeamPanel} style={S.clearBtn} {...hov}>👥 team</button>}
             <button className="clear-btn" onClick={logout} style={S.clearBtn} {...hov}>esci</button>
-            {mode!=="analytics" && mode!=="calendar" && mode!=="live" && <button className="clear-btn" onClick={clearChat} style={S.clearBtn} {...hov}>↺ reset</button>}
+            {mode!=="analytics" && mode!=="calendar" && mode!=="live" && mode!=="bacheca" && <button className="clear-btn" onClick={clearChat} style={S.clearBtn} {...hov}>↺ reset</button>}
           </div>
         </div>
       </header>
@@ -1196,7 +1200,7 @@ const removeAttachment = (idx) => {
         {MODES.filter(m=>m.id!=="calendar" && canAccessTab(role, m.id)).map(m => <button key={m.id} className="mode-btn" onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id?{ background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }:{ color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
       </div>
  
-      {!canAccessTab(role, mode) ? null : mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : mode==="live" ? LiveSessionPanel() : (
+      {!canAccessTab(role, mode) ? null : mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : mode==="live" ? LiveSessionPanel() : mode==="bacheca" ? <BoardTab supabase={supabase} userId={session?.user?.id} role={role} draft={boardDraft} onDraftConsumed={()=>setBoardDraft(null)} hov={hov} /> : (
         <>
           {mode !== "brainstorm" && (
             <div style={S.platformBar}>
@@ -1268,15 +1272,16 @@ const removeAttachment = (idx) => {
                             {(msg.mode==="caption"||msg.mode==="reels") && !analysis && <button className="copy-btn" style={{ ...S.copyBtn, color:"#2BB5AE" }} onClick={()=>analyzeCaption(i,msg.content)} disabled={analyzing===i} {...hov}>{analyzing===i?"⏳ analisi in corso…":"📊 analizza"}</button>}
                           </div>
                         )}
-                        {msg.mode==="brainstorm" && canAccessTab(role, "caption") && (
+                        {msg.mode==="brainstorm" && (
                           <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:4 }}>
                             <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#bbb", letterSpacing:"0.08em", textTransform:"uppercase", alignSelf:"center" }}>porta in →</span>
                             {[
                               { id:"caption", label:"✍️ Caption", color:"#E8354A" },
                               { id:"hashtag", label:"# Hashtag",  color:"#2BB5AE" },
                               { id:"reels",   label:"🎬 Video",    color:"#F07D2A" },
-                            ].map(t => (
-                              <button key={t.id} className="quick-chip" onClick={()=>{ setMode(t.id); setInput(msg.content.slice(0,200)); }}
+                              { id:"bacheca", label:"📋 Bacheca", color:"#F07D2A" },
+                            ].filter(t => canAccessTab(role, t.id)).map(t => (
+                              <button key={t.id} className="quick-chip" onClick={()=>{ if (t.id==="bacheca") { setBoardDraft({ title:"", description: msg.content.slice(0,3500) }); setMode("bacheca"); } else { setMode(t.id); setInput(msg.content.slice(0,200)); } }}
                                 style={{ padding:"4px 12px", fontSize:10, fontWeight:600, border:`1.5px solid ${t.color}44`, background:`${t.color}08`, color:t.color, borderRadius:20, fontFamily:"'DM Sans',sans-serif" }} {...hov}>
                                 {t.label}
                               </button>
