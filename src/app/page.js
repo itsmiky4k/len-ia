@@ -5,6 +5,7 @@ import { supabase } from "../lib/supabase";
 import { uploadAttachment, deleteAttachment, toBlock, resolveMessages, stripOldAttachments, MAX_FILES_PER_MESSAGE } from "../lib/attachments";
 import { normalizeRole, canAccessTab, canWrite as roleCanWrite } from "../lib/roles";
 import BoardTab from "../components/BoardTab";
+import AppointmentsTab from "../components/AppointmentsTab";
  
 // I prompt dell'AI stanno sul server: src/lib/prompts.js (usati da /api/chat).
  
@@ -16,6 +17,7 @@ const MODES = [
   { id: "analytics",  label: "📈 Analytics",   desc: "Traccia e analizza i tuoi post",           color: "#E8354A" },
   { id: "live",       label: "📡 Live",        desc: "Sessione condivisa in tempo reale col team", color: "#0EA5E9" },
   { id: "bacheca",    label: "📋 Bacheca",    desc: "Idee, proposte e progetti del collettivo", color: "#F07D2A" },
+  { id: "appuntamenti", label: "🗓️ Appuntamenti", desc: "Riunioni, incontri ed eventi del collettivo", color: "#0EA5E9" },
 ];
 const PLATFORMS   = ["Instagram", "Facebook", "Entrambi"];
 const TONE_OPTIONS = ["Ironico","Poetico","Diretto","Provocatorio","Caldo","Misterioso","Giocoso","Urgente"];
@@ -27,6 +29,7 @@ const CONTEXTUAL_CHIPS = {
   analytics:  [],
   live:       [],
   bacheca:    [],
+  appuntamenti: [],
 };
 const EMPTY_POST = { date:"", platform:"Instagram", format:"Post", caption:"", reach:0, impressions:0, likes:0, comments:0, saves:0, shares:0, followers_delta:0, hashtags:"" };
 const FORMATS = ["Post","Reel","Story","Carosello"];
@@ -1171,7 +1174,7 @@ const removeAttachment = (idx) => {
             <button className="clear-btn" onClick={()=>setDark(d=>!d)} title={dark?"Passa alla modalità chiara":"Passa alla modalità scura"} style={S.clearBtn} {...hov}>{dark?"☀️ chiaro":"🌙 scuro"}</button>
             {role==="admin" && <button className="clear-btn" onClick={openTeamPanel} style={S.clearBtn} {...hov}>👥 team</button>}
             <button className="clear-btn" onClick={logout} style={S.clearBtn} {...hov}>esci</button>
-            {mode!=="analytics" && mode!=="calendar" && mode!=="live" && mode!=="bacheca" && <button className="clear-btn" onClick={clearChat} style={S.clearBtn} {...hov}>↺ reset</button>}
+            {mode!=="analytics" && mode!=="calendar" && mode!=="live" && mode!=="bacheca" && mode!=="appuntamenti" && <button className="clear-btn" onClick={clearChat} style={S.clearBtn} {...hov}>↺ reset</button>}
           </div>
         </div>
       </header>
@@ -1200,7 +1203,7 @@ const removeAttachment = (idx) => {
         {MODES.filter(m=>m.id!=="calendar" && canAccessTab(role, m.id)).map(m => <button key={m.id} className="mode-btn" onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id?{ background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }:{ color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
       </div>
  
-      {!canAccessTab(role, mode) ? null : mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : mode==="live" ? LiveSessionPanel() : mode==="bacheca" ? <BoardTab supabase={supabase} userId={session?.user?.id} role={role} draft={boardDraft} onDraftConsumed={()=>setBoardDraft(null)} hov={hov} /> : (
+      {!canAccessTab(role, mode) ? null : mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : mode==="live" ? LiveSessionPanel() : mode==="appuntamenti" ? <AppointmentsTab supabase={supabase} userId={session?.user?.id} role={role} hov={hov} /> : mode==="bacheca" ? <BoardTab supabase={supabase} userId={session?.user?.id} role={role} draft={boardDraft} onDraftConsumed={()=>setBoardDraft(null)} hov={hov} /> : (
         <>
           {mode !== "brainstorm" && (
             <div style={S.platformBar}>
