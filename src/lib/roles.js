@@ -37,6 +37,7 @@ export const MODE_ACCESS = {
   hashtag:          EDITOR_UP,
   reels:            EDITOR_UP,
   analytics:        EDITOR_UP,
+  analytics_extract: EDITOR_UP, // legge uno screenshot di Insights e compila il form di Analytics
 };
  
 export const canAccessTab = (role, tab) => !!TAB_ACCESS[tab]?.includes(normalizeRole(role));
@@ -47,4 +48,3 @@ export const tabsForRole  = (role) => Object.keys(TAB_ACCESS).filter((t) => canA
 export const canWrite = (role) => normalizeRole(role) !== "ospite";
 export const isEditorOrAdmin = (role) => EDITOR_UP.includes(normalizeRole(role));
 export const isAdmin = (role) => normalizeRole(role) === "admin";
- 
