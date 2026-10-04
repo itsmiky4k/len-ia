@@ -147,6 +147,10 @@ export default function LenIA() {
 const [attachments, setAttachments] = useState([]); // array of { path, mediaType, name, preview, isPdf }
 const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
+  // Analytics: compilazione del form da screenshot
+  const shotInputRef = useRef(null);
+  const [extracting, setExtracting] = useState(false);
+  const [shotNote, setShotNote]     = useState("");
   const [isMobile, setIsMobile]   = useState(false);
   const isHoveringRef  = useRef(false);
   const cursorDotRef   = useRef(null);
@@ -613,7 +617,7 @@ const removeAttachment = (idx) => {
       const saved = await dbPost("analytics_posts", record);
       setPosts(p => [...p, { ...record, id:saved.id, date:record.post_date }]);
     }
-    setPostDraft(EMPTY_POST); setShowAddPost(false); setEditPost(null); setAiInsights(null);
+    setPostDraft(EMPTY_POST); setShowAddPost(false); setEditPost(null); setAiInsights(null); setShotNote("");
   };
  
   const deletePost = async (id) => {
@@ -622,6 +626,52 @@ const removeAttachment = (idx) => {
     setAiInsights(null);
   };
  
+  // Legge uno screenshot di Insights e compila i campi del form. L'AI non salva nulla:
+  // la persona controlla i valori e preme "salva post". Campi non letti = restano come sono,
+  // così si possono caricare più screenshot di fila (es. uno per le interazioni, uno per la reach).
+  const fillFromScreenshot = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || extracting) return;
+    setExtracting(true);
+    setShotNote("");
+    let att = null;
+    try {
+      att = await uploadAttachment(file);
+      const data = await callAI({
+        mode: "analytics_extract",
+        messages: [{ role:"user", content:[ toBlock(att), { type:"text", text:"Leggi le statistiche di questo screenshot." } ] }],
+      });
+      const raw = (data?.content || []).map(b => b.text || "").join("");
+      if (!raw) throw new Error(data?.error?.message || "risposta vuota");
+      const x = JSON.parse(raw.replace(/```json|```/g, "").trim());
+      if (x.error) { setShotNote("⚠️ Non sembra uno screenshot di statistiche."); return; }
+
+      const patch = {}, filled = [];
+      const nums = { reach:"reach", impressions:"impressioni", likes:"like", comments:"commenti", saves:"salvataggi", shares:"condivisioni", followers_delta:"delta follower" };
+      for (const [k, label] of Object.entries(nums)) {
+        const v = x[k];
+        if (v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v))) { patch[k] = Math.round(Number(v)); filled.push(label); }
+      }
+      if (typeof x.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x.date)) { patch.date = x.date; filled.push("data"); }
+      if (["Instagram","Facebook"].includes(x.platform)) { patch.platform = x.platform; filled.push("piattaforma"); }
+      if (FORMATS.includes(x.format)) { patch.format = x.format; filled.push("formato"); }
+      if (typeof x.hashtags === "string" && x.hashtags.trim()) { patch.hashtags = x.hashtags.trim().slice(0, 500); filled.push("hashtag"); }
+      if (typeof x.caption === "string" && x.caption.trim()) { patch.caption = x.caption.trim().slice(0, 3000); filled.push("caption"); }
+
+      if (!filled.length) { setShotNote("⚠️ Non sono riuscita a leggere dati da questo screenshot."); return; }
+      setPostDraft(d => ({ ...d, ...patch }));
+      setShotNote(`✓ Compilato: ${filled.join(", ")}. Controlla i valori prima di salvare. Puoi caricare un altro screenshot per i campi mancanti.`);
+    } catch (err) {
+      console.error(err);
+      setShotNote(`⚠️ Lettura non riuscita: ${err?.message || "errore"}`);
+    } finally {
+      // lo screenshot serve solo per leggere i numeri: lo togliamo da Storage
+      if (att?.path) deleteAttachment(att.path).catch(() => {});
+      setExtracting(false);
+    }
+  };
+
   const getAiInsights = async () => {
     if (posts.length === 0) return;
     setLoadingInsights(true);
@@ -974,7 +1024,11 @@ const removeAttachment = (idx) => {
       )}
       {showAddPost && (
         <div style={{ background:"var(--surface)", border:"1.5px solid rgba(22,163,74,0.2)", borderRadius:14, padding:"20px 24px", marginBottom:20, animation:"slideDown 0.25s cubic-bezier(0.22,1,0.36,1)" }}>
-          <div style={{ fontFamily:"'Playfair Display',serif", fontSize:15, fontWeight:700, marginBottom:16 }}>{editPost!==null?"✏️ Modifica post":"+ Nuovo post"}</div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10, flexWrap:"wrap", marginBottom: shotNote ? 8 : 16 }}>
+            <div style={{ fontFamily:"'Playfair Display',serif", fontSize:15, fontWeight:700 }}>{editPost!==null?"✏️ Modifica post":"+ Nuovo post"}</div>
+            <button className="clear-btn" disabled={extracting} onClick={()=>shotInputRef.current?.click()} style={{ ...S.clearBtn, fontSize:12, color:"#16A34A", border:"1.5px solid rgba(22,163,74,0.35)", opacity:extracting?0.6:1 }} {...hov} title="Carica uno screenshot di Insights e compila i campi">{extracting ? "leggo lo screenshot…" : "📷 compila da screenshot"}</button>
+          </div>
+          {shotNote && <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"var(--text2)", marginBottom:14, lineHeight:1.5 }}>{shotNote}</div>}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:12 }}>
             <div style={{ display:"flex", flexDirection:"column", gap:4 }}><label style={S.briefLabel}>Data</label><input type="date" style={{ ...S.briefInput, padding:"8px 12px" }} value={postDraft.date} onChange={e=>setPostDraft(d=>({...d,date:e.target.value}))} /></div>
             <div style={{ display:"flex", flexDirection:"column", gap:4 }}><label style={S.briefLabel}>Piattaforma</label><select style={{ ...S.briefInput, padding:"8px 12px" }} value={postDraft.platform} onChange={e=>setPostDraft(d=>({...d,platform:e.target.value}))}>{["Instagram","Facebook"].map(p=><option key={p}>{p}</option>)}</select></div>
@@ -984,7 +1038,7 @@ const removeAttachment = (idx) => {
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>{numInput("followers_delta","Delta follower")}<div style={{ display:"flex", flexDirection:"column", gap:4 }}><label style={S.briefLabel}>Hashtag</label><input style={{ ...S.briefInput, padding:"8px 12px" }} placeholder="#len #musica…" value={postDraft.hashtags} onChange={e=>setPostDraft(d=>({...d,hashtags:e.target.value}))} /></div></div>
           <div style={{ display:"flex", flexDirection:"column", gap:4, marginBottom:16 }}><label style={S.briefLabel}>Caption (opzionale)</label><textarea style={{ ...S.briefInput, minHeight:70, resize:"vertical" }} placeholder="Incolla la caption…" value={postDraft.caption} onChange={e=>setPostDraft(d=>({...d,caption:e.target.value}))} /></div>
           <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
-            <button className="clear-btn" style={{ ...S.clearBtn, fontSize:12 }} onClick={()=>{ setShowAddPost(false); setEditPost(null); setPostDraft(EMPTY_POST); }} {...hov}>annulla</button>
+            <button className="clear-btn" style={{ ...S.clearBtn, fontSize:12 }} onClick={()=>{ setShowAddPost(false); setEditPost(null); setPostDraft(EMPTY_POST); setShotNote(""); }} {...hov}>annulla</button>
             <button className="brief-save-btn" style={{ ...S.saveBtn, background:"linear-gradient(135deg,#16A34A,#2BB5AE)" }} onClick={savePost} {...hov}>{editPost!==null?"aggiorna →":"salva post →"}</button>
           </div>
         </div>
@@ -1199,6 +1253,8 @@ const removeAttachment = (idx) => {
         </div>
       )}
  
+      <input ref={shotInputRef} type="file" accept="image/*" style={{ display:"none" }} onChange={fillFromScreenshot} />
+
       <div className="hscroll" style={S.modeBar}>
         {MODES.filter(m=>m.id!=="calendar" && canAccessTab(role, m.id)).map(m => <button key={m.id} className="mode-btn" onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id?{ background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }:{ color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
       </div>
@@ -1460,4 +1516,3 @@ const S = {
   textarea: { flex:1, background:"var(--surface)", border:"1.5px solid var(--border)", borderRadius:14, padding:"12px 18px", fontSize:13, fontFamily:"'DM Sans',sans-serif", color:"var(--text)", resize:"none", lineHeight:1.7, transition:"all 0.2s ease", boxShadow:"0 2px 8px rgba(0,0,0,0.04)" },
   sendBtn: { width:52, height:52, border:"none", borderRadius:14, fontSize:20, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, boxShadow:"0 4px 16px rgba(0,0,0,0.1)" },
 };
- 
