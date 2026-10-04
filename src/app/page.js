@@ -1147,7 +1147,7 @@ const removeAttachment = (idx) => {
             <div style={S.logoIconWrap}><span style={{ fontSize:18, color:"#fff" }}>✦</span></div>
             <div><div style={S.logoMain}>LEN-IA</div><div style={S.logoSub}>by Collettivo LEN · {userName}</div></div>
           </div>
-          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          <div className="hscroll" style={{ display:"flex", gap:8, alignItems:"center", overflowX:"auto", minWidth:0, maxWidth:"100%", marginLeft:"auto", padding:"2px 0" }}>
             {canAccessTab(role, "brainstorm") && (
             <button className="clear-btn" onClick={()=>setShowHistory(true)} style={{ ...S.clearBtn, borderColor:savedItems.length>0?"#7B4FA0":"var(--border2)", color:savedItems.length>0?"#7B4FA0":"#999", position:"relative" }} {...hov}>
               {savedItems.length>0 && <span style={{ position:"absolute", top:3, right:3, width:6, height:6, borderRadius:"50%", background:"#7B4FA0" }} />}
@@ -1199,14 +1199,14 @@ const removeAttachment = (idx) => {
         </div>
       )}
  
-      <div style={S.modeBar}>
+      <div className="hscroll" style={S.modeBar}>
         {MODES.filter(m=>m.id!=="calendar" && canAccessTab(role, m.id)).map(m => <button key={m.id} className="mode-btn" onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id?{ background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }:{ color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
       </div>
  
       {!canAccessTab(role, mode) ? null : mode==="analytics" ? <AnalyticsPanel /> : mode==="calendar" ? <CalendarPanel /> : mode==="live" ? LiveSessionPanel() : mode==="appuntamenti" ? <AppointmentsTab supabase={supabase} userId={session?.user?.id} role={role} hov={hov} /> : mode==="bacheca" ? <BoardTab supabase={supabase} userId={session?.user?.id} role={role} draft={boardDraft} onDraftConsumed={()=>setBoardDraft(null)} hov={hov} /> : (
         <>
           {mode !== "brainstorm" && (
-            <div style={S.platformBar}>
+            <div className="hscroll" style={S.platformBar}>
               <span style={{ fontSize:14, color:"#ccc", marginRight:2 }}>📱</span>
               {PLATFORMS.map(p => <button key={p} className="platform-btn" onClick={()=>setPlatform(p)} style={{ ...S.platformBtn, ...(platform===p?{ background:currentMode.color, color:"#fff", fontWeight:600, border:`2px solid ${currentMode.color}` }:{}) }} {...hov}>{p}</button>)}
               <div style={{ width:1, height:20, background:"rgba(0,0,0,0.08)", margin:"0 6px", flexShrink:0 }} />
@@ -1216,7 +1216,7 @@ const removeAttachment = (idx) => {
             </div>
           )}
           {mode === "brainstorm" && (
-            <div style={{ ...S.platformBar, background:"rgba(14,165,233,0.04)", borderBottom:"1px solid rgba(14,165,233,0.15)" }}>
+            <div className="hscroll" style={{ ...S.platformBar, background:"rgba(14,165,233,0.04)", borderBottom:"1px solid rgba(14,165,233,0.15)" }}>
               <span style={{ fontSize:11, color:"#0EA5E9", fontFamily:"'DM Sans',sans-serif", fontWeight:600, letterSpacing:"0.06em", marginRight:8 }}>SPUNTI →</span>
               <div style={{ display:"flex", gap:6, overflowX:"auto", flex:1, paddingBottom:2 }}>
                 {CONTEXTUAL_CHIPS["brainstorm"].map(chip => <button key={chip} className="quick-chip" onClick={()=>setInput(chip)} style={{ ...S.ctxChip, borderColor:"rgba(14,165,233,0.3)", color:"#0EA5E9" }} {...hov}>{chip} →</button>)}
@@ -1369,6 +1369,8 @@ const css = `
   @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=DM+Sans:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   @media (pointer: fine) { * { cursor: none !important; } }
+  .hscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; touch-action: pan-x pan-y; scrollbar-width: none; }
+  .hscroll::-webkit-scrollbar { display: none; }
   ::-webkit-scrollbar { width: 3px; }
   ::-webkit-scrollbar-track { background: #f5f0eb; }
   ::-webkit-scrollbar-thumb { background: #E8354A; border-radius: 3px; }
@@ -1413,12 +1415,12 @@ const S = {
   drawerItemMeta: { display:"flex", gap:6, alignItems:"center" },
   drawerItemText: { fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"var(--text2)", lineHeight:1.7, whiteSpace:"pre-wrap", maxHeight:110, overflow:"hidden", WebkitMaskImage:"linear-gradient(to bottom,black 60%,transparent 100%)" },
   header: { borderBottom:"1px solid var(--border)", background:"var(--glass)", backdropFilter:"blur(20px)", position:"relative", zIndex:10 },
-  headerInner: { maxWidth:900, margin:"0 auto", padding:"16px 28px", display:"flex", alignItems:"center", justifyContent:"space-between" },
-  logo: { display:"flex", alignItems:"center", gap:14 },
+  headerInner: { maxWidth:900, margin:"0 auto", padding:"12px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10 },
+  logo: { display:"flex", alignItems:"center", gap:14, flexShrink:0 },
   logoIconWrap: { width:40, height:40, background:"linear-gradient(135deg,#E8354A,#2BB5AE)", borderRadius:12, display:"flex", alignItems:"center", justifyContent:"center", animation:"floatSymbol 3s ease-in-out infinite" },
   logoMain: { fontFamily:"'Playfair Display',serif", fontSize:22, fontWeight:900, background:"linear-gradient(135deg,#E8354A 0%,#7B4FA0 60%,#2BB5AE 100%)", backgroundSize:"200% auto", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", animation:"gradientShift 4s ease infinite", letterSpacing:"-0.02em" },
   logoSub: { fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#aaa", letterSpacing:"0.18em", textTransform:"uppercase", marginTop:1 },
-  clearBtn: { background:"transparent", border:"1px solid var(--border)", color:"#888", fontFamily:"'DM Sans',sans-serif", fontSize:12, fontWeight:500, padding:"6px 14px", borderRadius:20, letterSpacing:"0.04em" },
+  clearBtn: { background:"transparent", border:"1px solid var(--border)", color:"#888", fontFamily:"'DM Sans',sans-serif", fontSize:12, fontWeight:500, padding:"6px 14px", borderRadius:20, letterSpacing:"0.04em", flexShrink:0, whiteSpace:"nowrap" },
   briefPanel: { borderBottom:"1px solid var(--border)", background:"var(--glass)", backdropFilter:"blur(20px)", position:"relative", zIndex:9, animation:"slideDown 0.25s cubic-bezier(0.22,1,0.36,1)", boxShadow:"0 8px 32px rgba(0,0,0,0.06)" },
   briefInner: { maxWidth:900, margin:"0 auto", padding:"26px 28px 20px", display:"flex", flexDirection:"column", gap:18 },
   briefTitle: { fontFamily:"'Playfair Display',serif", fontSize:18, fontWeight:700, color:"var(--text)" },
@@ -1430,7 +1432,7 @@ const S = {
   briefInput: { background:"var(--surface2)", border:"1.5px solid var(--border)", borderRadius:10, padding:"10px 14px", fontSize:13, fontFamily:"'DM Sans',sans-serif", color:"var(--text2)", width:"100%", lineHeight:1.7, outline:"none", transition:"all 0.2s ease" },
   saveBtn: { background:"linear-gradient(135deg,#E8354A,#7B4FA0)", border:"none", color:"#fff", fontFamily:"'DM Sans',sans-serif", fontWeight:600, fontSize:13, padding:"10px 26px", borderRadius:20, letterSpacing:"0.02em" },
   modeBar: { display:"flex", borderBottom:"1px solid var(--border)", background:"var(--glass2)", position:"relative", zIndex:10, overflowX:"auto" },
-  modeBtn: { flex:1, minWidth:130, padding:"13px 18px", background:"transparent", border:"none", borderBottom:"3px solid transparent", display:"flex", flexDirection:"column", gap:3, color:"#bbb", fontFamily:"'DM Sans',sans-serif" },
+  modeBtn: { flex:"1 0 auto", minWidth:130, padding:"13px 18px", background:"transparent", border:"none", borderBottom:"3px solid transparent", display:"flex", flexDirection:"column", gap:3, color:"#bbb", fontFamily:"'DM Sans',sans-serif" },
   modeBtnLabel: { fontSize:12, fontWeight:700 },
   modeBtnDesc: { fontSize:9.5, opacity:0.6, letterSpacing:"0.03em" },
   platformBar: { display:"flex", alignItems:"center", gap:8, padding:"9px 28px", borderBottom:"1px solid var(--border)", background:"var(--glass)", position:"relative", zIndex:10, overflowX:"auto" },
