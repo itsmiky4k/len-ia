@@ -92,12 +92,21 @@ export default function AnalyticsTab({ posts, setPosts, aiInsights, setAiInsight
   const getAiInsights = async () => {
     if (posts.length === 0) return;
     setLoadingInsights(true);
+    let data = null;
     try {
       const summary = posts.map(p => `Data: ${p.date} | Piattaforma: ${p.platform} | Formato: ${p.format} | Reach: ${p.reach} | Impressioni: ${p.impressions} | Like: ${p.likes} | Commenti: ${p.comments} | Salvataggi: ${p.saves} | Condivisioni: ${p.shares} | Delta follower: ${p.followers_delta} | Hashtag: ${p.hashtags||"n/d"} | Caption: ${p.caption||"n/d"}`).join("\n");
-      const data = await callAI({ mode:"analytics", messages:[{ role:"user", content:`Analizza questi dati di ${posts.length} post:\n\n${summary}` }] });
-      const raw = data.content?.map(b => b.text||"").join("") || "{}";
-      setAiInsights(JSON.parse(raw.replace(/```json|```/g,"").trim()));
-    } catch { setAiInsights({ error:true }); }
+      data = await callAI({ mode:"analytics", messages:[{ role:"user", content:`Analizza questi dati di ${posts.length} post:\n\n${summary}` }] });
+      if (data?.error) throw new Error(data.error.message || "errore del server");
+      const raw = (data?.content || []).map(b => b.text || "").join("");
+      // prendo solo la parte tra la prima { e l'ultima }: regge anche testo o ``` attorno al JSON
+      const start = raw.indexOf("{"), end = raw.lastIndexOf("}");
+      if (start === -1 || end <= start) throw new Error("risposta non in formato JSON");
+      setAiInsights(JSON.parse(raw.slice(start, end + 1)));
+    } catch (err) {
+      console.error("analisi AI:", err, data);
+      const msg = data?.stop_reason === "max_tokens" ? "risposta troncata (troppo lunga)" : (err?.message || "errore");
+      setAiInsights({ error: msg });
+    }
     finally { setLoadingInsights(false); }
   };
 
@@ -147,6 +156,11 @@ export default function AnalyticsTab({ posts, setPosts, aiInsights, setAiInsight
           </div>
           <div style={S.analysisSubLabel}>💡 Consigli strategici</div>
           {aiInsights.consigli?.map((c,i) => <div key={i} style={{ fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"var(--text2)", lineHeight:1.7, paddingLeft:4 }}>→ {c}</div>)}
+        </div>
+      )}
+      {aiInsights?.error && (
+        <div style={{ background:"rgba(232,53,74,0.06)", border:"1px solid rgba(232,53,74,0.25)", borderRadius:12, padding:"12px 16px", marginBottom:20, fontFamily:"'DM Sans',sans-serif", fontSize:12, color:"var(--text2)", lineHeight:1.5 }}>
+          ⚠️ Analisi non riuscita{typeof aiInsights.error === "string" ? `: ${aiInsights.error}` : ""}. Riprova tra poco.
         </div>
       )}
       {showAddPost && (
