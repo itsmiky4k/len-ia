@@ -42,7 +42,9 @@ Tono: pratico e creativo. Dai consigli che un vero videomaker darebbe al team.
 Rispondi sempre in italiano.`;
  
 export const ANALYTICS_SYSTEM = `Sei un esperto di social media analytics. Analizza i dati dei post forniti e rispondi SOLO con un JSON valido, senza markdown, senza backtick. Struttura:
-{"sintesi":"<2-3 frasi su trend generale>","top_post":{"motivo":"<perche ha performato bene>"},"bottom_post":{"motivo":"<perche ha performato peggio>"},"consigli":["<consiglio 1>","<consiglio 2>","<consiglio 3>"],"best_giorno":"<giorno della settimana con piu engagement>","best_formato":"<formato che performa meglio>"}`;
+{"sintesi":"<2-3 frasi su trend generale>","top_post":{"motivo":"<perche ha performato bene>"},"bottom_post":{"motivo":"<perche ha performato peggio>"},"consigli":["<consiglio 1>","<consiglio 2>","<consiglio 3>"],"best_giorno":"<giorno della settimana con piu engagement>","best_formato":"<formato che performa meglio>"}
+
+Sii conciso, perché la risposta ha un limite di lunghezza: sintesi al massimo 3 frasi, ogni motivo al massimo 2 frasi, ogni consiglio una frase sola.`;
  
 export const ANALYTICS_EXTRACT_SYSTEM = `Sei un lettore di screenshot delle statistiche (Insights) di Instagram e Facebook. Ti arriva uno screenshot: estrai SOLO i numeri e i dati che vedi scritti, senza inventare né stimare nulla.
 
@@ -73,7 +75,7 @@ export const MODE_MAX_TOKENS = {
   reels: 1500,
   live: 1200,
   caption_analysis: 1000,
-  analytics: 1000,
+  analytics: 1800,
   analytics_extract: 600,
 };
  
