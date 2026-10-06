@@ -14,15 +14,18 @@ import LiveTab from "../components/LiveTab";
  
 // I prompt dell'AI stanno sul server: src/lib/prompts.js (usati da /api/chat).
  
+// Gradiente con i 3 colori LEN. Le tab con "gradient" hanno anche un "color" a tinta unita di riserva
+// (usato dove serve un colore solo, es. il cursore). "animated" = gradiente in movimento (vedi .tab-turbulence).
+const LEN_GRADIENT = "linear-gradient(135deg,#E8354A,#2BB5AE,#7B4FA0)";
 const MODES = [
   { id: "brainstorm", label: "💡 Brainstorm",  desc: "Consulente creativo libero da schemi",    color: "#E8354A" },
   { id: "caption",    label: "✍️ Caption",    desc: "Scrivi una caption per il tuo post",       color: "#2BB5AE" },
   { id: "hashtag",    label: "# Hashtag",     desc: "Trova gli hashtag perfetti",               color: "#7B4FA0" },
-  { id: "reels",      label: "🎬 Video",       desc: "Assistente per la produzione video",       color: "#2BB5AE" },
-  { id: "analytics",  label: "📈 Analytics",   desc: "Traccia e analizza i tuoi post",           color: "#E8354A" },
-  { id: "live",       label: "📡 Live",        desc: "Sessione condivisa in tempo reale col team", color: "#0EA5E9" },
-  { id: "bacheca",    label: "📋 Bacheca",    desc: "Idee, proposte e progetti del collettivo", color: "#F07D2A" },
-  { id: "appuntamenti", label: "🗓️ Appuntamenti", desc: "Riunioni, incontri ed eventi del collettivo", color: "#0EA5E9" },
+  { id: "reels",      label: "🎬 Video",       desc: "Assistente per la produzione video",       color: "#E8354A" },
+  { id: "analytics",  label: "📈 Analytics",   desc: "Traccia e analizza i tuoi post",           color: "#2BB5AE" },
+  { id: "bacheca",    label: "📋 Bacheca",    desc: "Idee, proposte e progetti del collettivo", color: "#7B4FA0" },
+  { id: "appuntamenti", label: "🗓️ Appuntamenti", desc: "Riunioni, incontri ed eventi del collettivo", color: "#2BB5AE", gradient: LEN_GRADIENT },
+  { id: "live",       label: "📡 Live",        desc: "Sessione condivisa in tempo reale col team", color: "#E8354A", gradient: LEN_GRADIENT, animated: true },
 ];
 const PLATFORMS   = ["Instagram", "Facebook", "Entrambi"];
 const TONE_OPTIONS = ["Ironico","Poetico","Diretto","Provocatorio","Caldo","Misterioso","Giocoso","Urgente"];
@@ -710,7 +713,7 @@ const removeAttachment = (idx) => {
       )}
  
       <div className="hscroll" style={S.modeBar}>
-        {MODES.filter(m=>m.id!=="calendar" && canAccessTab(role, m.id)).map(m => <button key={m.id} className="mode-btn" onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id?{ background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }:{ color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
+        {MODES.filter(m=>m.id!=="calendar" && canAccessTab(role, m.id)).map(m => <button key={m.id} className={`mode-btn${mode===m.id && m.animated ? " tab-turbulence" : ""}`} onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id ? (m.animated ? { background:undefined, color:"#fff", borderBottom:"3px solid transparent" } : m.gradient ? { background:m.gradient, backgroundOrigin:"border-box", color:"#fff", borderBottom:"3px solid transparent" } : { background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }) : { color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
       </div>
  
       {!canAccessTab(role, mode) ? null : mode==="analytics" ? <AnalyticsTab posts={posts} setPosts={setPosts} aiInsights={aiInsights} setAiInsights={setAiInsights} userName={userName} hov={hov} /> : mode==="calendar" ? <CalendarTab calEvents={calEvents} setCalEvents={setCalEvents} userName={userName} /> : mode==="live" ? null : mode==="appuntamenti" ? <AppointmentsTab supabase={supabase} userId={session?.user?.id} role={role} hov={hov} /> : mode==="bacheca" ? <BoardTab supabase={supabase} userId={session?.user?.id} role={role} draft={boardDraft} onDraftConsumed={()=>setBoardDraft(null)} hov={hov} /> : (
@@ -739,11 +742,11 @@ const removeAttachment = (idx) => {
               <div style={S.emptyState}>
                 <div style={{ fontFamily:"'Playfair Display',serif", fontSize:52, color:"#E8354A", animation:"floatSymbol 3s ease-in-out infinite", lineHeight:1 }}>✦</div>
                 <p style={S.emptyTitle}>Ciao, {userName}!</p>
-                <p style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:18, fontStyle:"italic", color:"#E8354A" }}>Sono LEN-IA, la tua AI per i social del Collettivo LEN.</p>
+                <p style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:18, fontStyle:"italic", color:"#E8354A" }}>Sono LEN-IA, la tua assistente per i progetti del Collettivo LEN.</p>
                 <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:14, color:"#aaa", lineHeight:1.8 }}>Scegli una modalita, usa i prompt suggeriti,<br />o scrivi direttamente cosa ti serve.</p>
                 <div style={{ width:40, height:2, background:"linear-gradient(90deg,#E8354A,#2BB5AE)", borderRadius:2, margin:"6px 0" }} />
                 <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:"center" }}>
-                  {MODES.filter(m=>m.id!=="analytics" && canAccessTab(role, m.id)).map(m => <button key={m.id} className="quick-chip" onClick={()=>setMode(m.id)} style={{ ...S.chip, borderColor:`${m.color}55`, color:m.color, background:`${m.color}08` }} {...hov}>{m.label}</button>)}
+                  {MODES.filter(m=>m.id!=="analytics" && canAccessTab(role, m.id)).map(m => <button key={m.id} className="quick-chip" onClick={()=>setMode(m.id)} style={{ ...S.chip, ...(m.gradient ? { border:"1.5px solid transparent", color:"var(--text2)", background:`linear-gradient(var(--surface),var(--surface)) padding-box, ${m.gradient} border-box` } : { borderColor:`${m.color}55`, color:m.color, background:`${m.color}08` }) }} {...hov}>{m.label}</button>)}
                 </div>
               </div>
             )}
@@ -789,10 +792,10 @@ const removeAttachment = (idx) => {
                           <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:4 }}>
                             <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#bbb", letterSpacing:"0.08em", textTransform:"uppercase", alignSelf:"center" }}>porta in →</span>
                             {[
-                              { id:"caption", label:"✍️ Caption", color:"#E8354A" },
-                              { id:"hashtag", label:"# Hashtag",  color:"#2BB5AE" },
-                              { id:"reels",   label:"🎬 Video",    color:"#F07D2A" },
-                              { id:"bacheca", label:"📋 Bacheca", color:"#F07D2A" },
+                              { id:"caption", label:"✍️ Caption", color:"#2BB5AE" },
+                              { id:"hashtag", label:"# Hashtag",  color:"#7B4FA0" },
+                              { id:"reels",   label:"🎬 Video",    color:"#E8354A" },
+                              { id:"bacheca", label:"📋 Bacheca", color:"#7B4FA0" },
                             ].filter(t => canAccessTab(role, t.id)).map(t => (
                               <button key={t.id} className="quick-chip" onClick={()=>{ if (t.id==="bacheca") { setBoardDraft({ title:"", description: msg.content.slice(0,3500) }); setMode("bacheca"); } else { setMode(t.id); setInput(msg.content.slice(0,200)); } }}
                                 style={{ padding:"4px 12px", fontSize:10, fontWeight:600, border:`1.5px solid ${t.color}44`, background:`${t.color}08`, color:t.color, borderRadius:20, fontFamily:"'DM Sans',sans-serif" }} {...hov}>
@@ -895,6 +898,27 @@ const css = `
   @keyframes bounce { 0%,80%,100%{transform:translateY(0) scale(1)} 40%{transform:translateY(-7px) scale(1.15)} }
   .mode-btn { transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1) !important; }
   .mode-btn:hover { transform: translateY(-3px) !important; box-shadow: 0 8px 24px rgba(0,0,0,0.1) !important; }
+  @keyframes lenTurbulence {
+    0%   { background-position: 10% 20%, 90% 10%, 40% 95%, 0% 0%; background-size: 160% 160%, 200% 200%, 180% 180%, 100% 100%; }
+    25%  { background-position: 70% 60%, 20% 80%, 85% 15%, 0% 0%; background-size: 210% 210%, 170% 170%, 220% 220%, 100% 100%; }
+    50%  { background-position: 95% 90%, 55% 30%, 10% 60%, 0% 0%; background-size: 180% 180%, 230% 230%, 160% 160%, 100% 100%; }
+    75%  { background-position: 30% 85%, 100% 70%, 60% 5%,  0% 0%; background-size: 220% 220%, 160% 160%, 200% 200%, 100% 100%; }
+    100% { background-position: 10% 20%, 90% 10%, 40% 95%, 0% 0%; background-size: 160% 160%, 200% 200%, 180% 180%, 100% 100%; }
+  }
+  .tab-turbulence {
+    background-image:
+      radial-gradient(circle at 50% 50%, #E8354A 0%, rgba(232,53,74,0) 52%),
+      radial-gradient(circle at 50% 50%, #2BB5AE 0%, rgba(43,181,174,0) 62%),
+      radial-gradient(circle at 50% 50%, #7B4FA0 0%, rgba(123,79,160,0) 74%),
+      linear-gradient(135deg, #E8354A, #2BB5AE, #7B4FA0);
+    background-color: transparent;
+    background-repeat: no-repeat;
+    background-origin: border-box;
+    background-size: 160% 160%, 200% 200%, 180% 180%, 100% 100%;
+    background-position: 10% 20%, 90% 10%, 40% 95%, 0% 0%;
+    animation: lenTurbulence 11s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) { .tab-turbulence { animation: none; } }
   .platform-btn { transition: all 0.25s cubic-bezier(0.34,1.56,0.64,1) !important; }
   .platform-btn:hover { transform: scale(1.06) !important; }
   .send-btn { transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1) !important; }
