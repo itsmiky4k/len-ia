@@ -13,6 +13,7 @@ import CalendarTab from "../components/CalendarTab";
 import LiveTab from "../components/LiveTab";
 import TeamPanel from "../components/TeamPanel";
 import SavedPanel from "../components/SavedPanel";
+import BriefPanel from "../components/BriefPanel";
  
 // I prompt dell'AI stanno sul server: src/lib/prompts.js (usati da /api/chat).
  
@@ -30,7 +31,6 @@ const MODES = [
   { id: "live",       label: "📡 Live",        desc: "Sessione condivisa in tempo reale col team", color: "#E8354A", gradient: LEN_GRADIENT, animated: true },
 ];
 const PLATFORMS   = ["Instagram", "Facebook", "Entrambi"];
-const TONE_OPTIONS = ["Ironico","Poetico","Diretto","Provocatorio","Caldo","Misterioso","Giocoso","Urgente"];
 const CONTEXTUAL_CHIPS = {
   brainstorm: ["nuova direzione creativa","concept per il prossimo mese","identita visiva del collettivo","come differenziarci","collab da proporre","tema per una campagna"],
   caption:    ["backstage di una performance","nuovo progetto artistico","evento imminente","collab con un artista","behind the scenes","lancio di un brano"],
@@ -621,25 +621,7 @@ const removeAttachment = (idx) => {
         </div>
       </header>
  
-      {showBrief && (
-        <div style={S.briefPanel}>
-          <div style={S.briefInner}>
-            <div><div style={S.briefTitle}>🎨 Brief di Stile</div><div style={S.briefSubtitle}>Insegna a LEN-IA come vuoi che scriva — salvato nel cloud ☁️</div></div>
-            <div style={S.briefSection}>
-              <label style={S.briefLabel}>Tono / registro</label>
-              <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
-                {TONE_OPTIONS.map(t => <button key={t} className="tone-chip" onClick={()=>setBrief(b=>({...b,tones:b.tones.includes(t)?b.tones.filter(x=>x!==t):[...b.tones,t]}))} style={{ ...S.toneChip, ...(brief.tones.includes(t)?S.toneChipActive:{}) }} {...hov}>{t}</button>)}
-              </div>
-            </div>
-            <div style={S.briefSection}><label style={S.briefLabel}>Parole chiave / mood</label><input style={S.briefInput} value={brief.keywords} onChange={e=>setBrief(b=>({...b,keywords:e.target.value}))} placeholder="es. underground, visuale, identita, notturno…" /></div>
-            <div style={S.briefSection}><label style={S.briefLabel}>Esempi di caption che ti piacciono</label><textarea style={{ ...S.briefInput, minHeight:90, resize:"vertical" }} value={brief.examples} onChange={e=>setBrief(b=>({...b,examples:e.target.value}))} placeholder="es. 'notte. studio. domande senza risposta. ✶'" /></div>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <button className="clear-btn" onClick={()=>setBrief({ tones:[], keywords:"", examples:"" })} style={{ ...S.clearBtn, fontSize:12 }} {...hov}>🗑 cancella tutto</button>
-              <button className="brief-save-btn" onClick={saveBrief} style={S.saveBtn} {...hov}>{briefSaved?"✓ salvato nel cloud!":"salva brief ☁️ →"}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {showBrief && <BriefPanel brief={brief} setBrief={setBrief} briefSaved={briefSaved} onSave={saveBrief} hov={hov} />}
  
       <div className="hscroll" style={S.modeBar}>
         {MODES.filter(m=>m.id!=="calendar" && canAccessTab(role, m.id)).map(m => <button key={m.id} className={`mode-btn${mode===m.id && m.animated ? " tab-turbulence" : ""}`} onClick={()=>setMode(m.id)} style={{ ...S.modeBtn, ...(mode===m.id ? (m.animated ? { background:undefined, color:"#fff", borderBottom:"3px solid transparent" } : m.gradient ? { background:m.gradient, backgroundOrigin:"border-box", color:"#fff", borderBottom:"3px solid transparent" } : { background:m.color, color:"#fff", borderBottom:`3px solid ${m.color}` }) : { color:"#bbb" }) }} {...hov}><span style={S.modeBtnLabel}>{m.label}</span><span style={S.modeBtnDesc}>{m.desc}</span></button>)}
