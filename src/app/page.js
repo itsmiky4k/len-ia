@@ -11,6 +11,7 @@ import AppointmentsTab from "../components/AppointmentsTab";
 import AnalyticsTab from "../components/AnalyticsTab";
 import CalendarTab from "../components/CalendarTab";
 import LiveTab from "../components/LiveTab";
+import TeamPanel from "../components/TeamPanel";
  
 // I prompt dell'AI stanno sul server: src/lib/prompts.js (usati da /api/chat).
  
@@ -56,7 +57,6 @@ export default function LenIA() {
   const [authLoading, setAuthLoading] = useState(false);
   const [nameDraft, setNameDraft]     = useState("");
   const [showTeam, setShowTeam]       = useState(false);
-  const [teamProfiles, setTeamProfiles] = useState([]);
   const role = normalizeRole(profile?.role);
   const canWrite = roleCanWrite(role);
   const [loadingUser, setLoadingUser] = useState(false);
@@ -248,17 +248,7 @@ const [uploading, setUploading] = useState(false);
     setAuthEmail(""); setAuthStage("idle");
   };
  
-  const openTeamPanel = async () => {
-    setShowTeam(true);
-    const { data } = await supabase.from("profiles").select("*").order("created_at", { ascending:true });
-    setTeamProfiles(data || []);
-  };
- 
-  const changeRole = async (id, newRole) => {
-    const { error } = await supabase.from("profiles").update({ role:newRole }).eq("id", id);
-    if (error) { alert("Errore aggiornamento ruolo: " + error.message); return; }
-    setTeamProfiles(p => p.map(x => x.id===id ? { ...x, role:newRole } : x));
-  };
+  const openTeamPanel = () => setShowTeam(true);
  
   // ── BRAINSTORM SESSION FUNCTIONS ──
   const saveBrainstormSession = async (msgs, hist) => {
@@ -585,41 +575,7 @@ const removeAttachment = (idx) => {
         </div>
       )}
  
-      {showTeam && (
-        <div style={S.drawerOverlay} onClick={()=>setShowTeam(false)}>
-          <div style={S.drawer} onClick={e=>e.stopPropagation()}>
-            <div style={S.drawerHeader}>
-              <span style={S.drawerTitle}>👥 Team del Collettivo</span>
-              <button className="clear-btn" style={{ ...S.clearBtn, fontSize:12 }} onClick={()=>setShowTeam(false)} {...hov}>✕ chiudi</button>
-            </div>
-            {teamProfiles.length===0 ? (
-              <div style={S.drawerEmpty}><div style={{ fontSize:36, marginBottom:12 }}>👤</div><p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#bbb" }}>Nessun membro trovato.</p></div>
-            ) : (
-              <div style={S.drawerList}>
-                {teamProfiles.map(p => (
-                  <div key={p.id} style={S.drawerItem}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10 }}>
-                      <div>
-                        <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight:700 }}>{p.display_name || "(nome non impostato)"}</div>
-                        <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#aaa" }}>{p.id===profile?.id ? "tu" : p.id.slice(0,8)}</div>
-                      </div>
-                      <select value={p.role} onChange={e=>changeRole(p.id, e.target.value)} disabled={p.id===profile?.id} style={{ ...S.briefInput, padding:"6px 10px", fontSize:12, width:"auto" }}>
-                        <option value="admin">admin</option>
-                        <option value="editor">editor</option>
-                        <option value="membro">membro</option>
-                        <option value="ospite">ospite</option>
-                      </select>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ padding:"14px 20px", fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#aaa" }}>
-              Per invitare un nuovo membro: Supabase → Authentication → Users → Invite user, con la sua email.
-            </div>
-          </div>
-        </div>
-      )}
+      {showTeam && <TeamPanel onClose={()=>setShowTeam(false)} currentUserId={profile?.id} hov={hov} />}
  
  
       {showBSessions && (
