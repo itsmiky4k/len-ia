@@ -12,6 +12,7 @@ import AnalyticsTab from "../components/AnalyticsTab";
 import CalendarTab from "../components/CalendarTab";
 import LiveTab from "../components/LiveTab";
 import TeamPanel from "../components/TeamPanel";
+import SavedPanel from "../components/SavedPanel";
  
 // I prompt dell'AI stanno sul server: src/lib/prompts.js (usati da /api/chat).
  
@@ -545,35 +546,7 @@ const removeAttachment = (idx) => {
       </>}
       <div style={S.bgNoise} /><div style={S.bgA1} /><div style={S.bgA2} />
  
-      {showHistory && (
-        <div style={S.drawerOverlay} onClick={()=>setShowHistory(false)}>
-          <div style={S.drawer} onClick={e=>e.stopPropagation()}>
-            <div style={S.drawerHeader}>
-              <span style={S.drawerTitle}>💾 Storico Salvati</span>
-              <button className="clear-btn" style={{ ...S.clearBtn, fontSize:12 }} onClick={()=>setShowHistory(false)} {...hov}>✕ chiudi</button>
-            </div>
-            {savedItems.length===0 ? (
-              <div style={S.drawerEmpty}><div style={{ fontSize:36, marginBottom:12 }}>📭</div><p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#bbb" }}>Nessuna risposta salvata ancora.</p></div>
-            ) : (
-              <div style={S.drawerList}>
-                {savedItems.map(item => {
-                  const m = MODES.find(x=>x.id===item.mode);
-                  return (
-                    <div key={item.id} style={S.drawerItem}>
-                      <div style={S.drawerItemMeta}><span style={{ ...S.modeTag, background:m?.color||"#999" }}>{m?.label}</span><span style={S.platformTag}>{item.platform}</span><span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#ccc", marginLeft:"auto" }}>{item.savedAt}</span></div>
-                      <pre style={S.drawerItemText}>{item.content}</pre>
-                      <div style={{ display:"flex", gap:10 }}>
-                        <button className="copy-btn" style={S.copyBtn} onClick={()=>navigator.clipboard.writeText(item.content)} {...hov}>⎘ copia →</button>
-                        <button className="copy-btn" style={{ ...S.copyBtn, color:"#E8354A" }} onClick={()=>removeSaved(item.id)} {...hov}>✕ rimuovi</button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {showHistory && <SavedPanel items={savedItems} modes={MODES} onRemove={removeSaved} onClose={()=>setShowHistory(false)} hov={hov} />}
  
       {showTeam && <TeamPanel onClose={()=>setShowTeam(false)} currentUserId={profile?.id} hov={hov} />}
  
