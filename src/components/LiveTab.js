@@ -12,6 +12,9 @@ import { supabase } from "../lib/supabase";
 import { callAI } from "../lib/api";
 import { S } from "../lib/styles";
 
+// Gradiente statico LEN (stessi tre colori delle tab). L'animazione resta solo sulla tab.
+const LEN_GRADIENT_STATIC = "linear-gradient(135deg,#E8354A,#2BB5AE,#7B4FA0)";
+
 export default function LiveTab({ visible, userName, canWrite, hov }) {
   // Sessione Live (condivisa in tempo reale)
   const [liveCode, setLiveCode]         = useState("");
@@ -118,7 +121,7 @@ export default function LiveTab({ visible, userName, canWrite, hov }) {
             Crea una stanza condivisa o unisciti con un codice: tutto il team vede la stessa conversazione con LEN-IA in tempo reale.
           </p>
           <div style={{ display:"flex", flexDirection:"column", gap:10, width:"100%", maxWidth:320 }}>
-            <button className="brief-save-btn" style={{ ...S.saveBtn, background:"linear-gradient(135deg,#0EA5E9,#2BB5AE)", textAlign:"center", padding:"12px" }}
+            <button className="brief-save-btn" style={{ ...S.saveBtn, background:LEN_GRADIENT_STATIC, textAlign:"center", padding:"12px" }}
               onClick={() => createLiveSession(window.prompt("Titolo della sessione (opzionale):") || "")} {...hov}>
               + Crea nuova stanza
             </button>
@@ -152,13 +155,13 @@ export default function LiveTab({ visible, userName, canWrite, hov }) {
               {m.role === "user" ? (
                 <div style={{ display:"flex", justifyContent: m.sender_name === userName ? "flex-end" : "flex-start" }}>
                   <div style={S.userBubble}>
-                    <div style={{ fontSize:10, fontWeight:700, color:"#0EA5E9", marginBottom:4 }}>{m.sender_name}</div>
+                    <div style={{ fontSize:10, fontWeight:700, color:"#7B4FA0", marginBottom:4 }}>{m.sender_name}</div>
                     <p style={{ fontSize:13, color:"var(--text2)", lineHeight:1.7, fontFamily:"'DM Sans',sans-serif" }}>{m.content}</p>
                   </div>
                 </div>
               ) : (
                 <div style={S.assistantRow}>
-                  <div style={{ ...S.assistantAvatar, background:"linear-gradient(135deg,#0EA5E9,#0EA5E988)" }}>✦</div>
+                  <div style={{ ...S.assistantAvatar, background:LEN_GRADIENT_STATIC }}>✦</div>
                   <div style={S.assistantContent}>
                     <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:12, fontStyle:"italic", color:"#bbb", letterSpacing:"0.05em" }}>LEN-IA</div>
                     <pre style={S.assistantText}>{m.content}</pre>
@@ -175,7 +178,7 @@ export default function LiveTab({ visible, userName, canWrite, hov }) {
             <textarea style={S.textarea} rows={1} placeholder="Scrivi al gruppo…" value={liveInput}
               onChange={e => setLiveInput(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendLiveMessage(); } }} />
-            <button className="send-btn" style={{ ...S.sendBtn, background:"linear-gradient(135deg,#0EA5E9,#2BB5AE)", color:"#fff" }} disabled={liveLoading || !liveInput.trim() || !canWrite} title={!canWrite?"Il tuo ruolo è sola lettura":""} onClick={sendLiveMessage} {...hov}>→</button>
+            <button className="send-btn" style={{ ...S.sendBtn, background:LEN_GRADIENT_STATIC, color:"#fff" }} disabled={liveLoading || !liveInput.trim() || !canWrite} title={!canWrite?"Il tuo ruolo è sola lettura":""} onClick={sendLiveMessage} {...hov}>→</button>
           </div>
         </div>
       </div>
