@@ -394,6 +394,11 @@ const [uploading, setUploading] = useState(false);
       console.error("API error:", err);
       if (!isRetry) {
         setMessages(p => [...p, { role:"assistant", content:"⚠️ Errore di connessione. Riprova tra qualche secondo!", isError:true, retryHistory:trimmedHistory }]);
+      } else {
+        // retry fallito: aggiorna il messaggio d'errore esistente, così si vede che ha riprovato
+        setMessages(p => p.map((m, idx) => idx === p.length - 1 && m.isError
+          ? { ...m, content:"⚠️ Ancora nessuna risposta. Controlla la connessione e riprova tra poco." }
+          : m));
       }
     }
     finally { setLoading(false); }
