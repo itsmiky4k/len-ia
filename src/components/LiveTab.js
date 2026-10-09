@@ -140,7 +140,7 @@ export default function LiveTab({ visible, userName, canWrite, hov }) {
           <div>
             <div style={{ fontFamily:"'Playfair Display',serif", fontSize:15, fontWeight:700 }}>{activeLive.title}</div>
             <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"#aaa" }}>
-              codice: <b>{activeLive.code}</b> · {liveOnline.length} onlin{liveOnline.length===1?"e":"i"}{liveOnline.length>0 ? ` (${liveOnline.join(", ")})` : ""}
+              codice: <b>{activeLive.code}</b> · {liveOnline.length} online{liveOnline.length>0 ? ` (${liveOnline.join(", ")})` : ""}
             </div>
           </div>
           <div style={{ display:"flex", gap:8, alignItems:"center" }}>
