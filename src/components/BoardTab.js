@@ -20,7 +20,8 @@ const TITLE_MAX = 120;
 const DESC_MAX = 4000;
 const COMMENT_MAX = 1000;
 const DESC_PREVIEW = 280;
-const ACCENT = "#F07D2A";
+const ACCENT = "#7B4FA0";
+const LEN_GRADIENT = "linear-gradient(135deg,#E8354A,#2BB5AE,#7B4FA0)"; // gradiente statico LEN, come in Live
  
 const sans = "'DM Sans',sans-serif";
  
@@ -41,7 +42,7 @@ const ui = {
   input:   { background: "var(--surface2)", border: "1.5px solid var(--border)", borderRadius: 10, padding: "10px 14px", fontSize: 13, fontFamily: sans, color: "var(--text2)", width: "100%", lineHeight: 1.6, outline: "none", boxSizing: "border-box" },
   label:   { fontFamily: sans, fontSize: 10, color: "#bbb", letterSpacing: "0.14em", textTransform: "uppercase", fontWeight: 600 },
   pill:    { background: "transparent", border: "1px solid var(--border2)", color: "#888", fontFamily: sans, fontSize: 12, fontWeight: 500, padding: "6px 14px", borderRadius: 20, cursor: "pointer" },
-  primary: { background: `linear-gradient(135deg,${ACCENT},#E8354A)`, border: "none", color: "#fff", fontFamily: sans, fontWeight: 600, fontSize: 13, padding: "10px 22px", borderRadius: 20, cursor: "pointer" },
+  primary: { background: LEN_GRADIENT, border: "none", color: "#fff", fontFamily: sans, fontWeight: 600, fontSize: 13, padding: "10px 22px", borderRadius: 20, cursor: "pointer" },
   meta:    { fontFamily: sans, fontSize: 11, color: "#aaa" },
   text:    { fontFamily: sans, fontSize: 13.5, color: "var(--text2)", lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0 },
   error:   { fontFamily: sans, fontSize: 12.5, color: "#E8354A", background: "rgba(232,53,74,0.08)", border: "1px solid rgba(232,53,74,0.25)", borderRadius: 10, padding: "10px 14px" },
@@ -357,4 +358,3 @@ export default function BoardTab({ supabase, userId, role, draft, onDraftConsume
     </div>
   );
 }
- 
