@@ -2,7 +2,7 @@
 // LEN-IA v1.1 — fix cursor
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { uploadAttachment, deleteAttachment, toBlock, MAX_FILES_PER_MESSAGE } from "../lib/attachments";
+import { toBlock } from "../lib/attachments";
 import { callAI, dbGet, dbPost, dbPut, dbDelete } from "../lib/api";
 import { S } from "../lib/styles";
 import { normalizeRole, canAccessTab, canWrite as roleCanWrite } from "../lib/roles";
@@ -16,6 +16,7 @@ import SavedPanel from "../components/SavedPanel";
 import BriefPanel from "../components/BriefPanel";
 import SessionsPanel from "../components/SessionsPanel";
 import ChatMessages from "../components/ChatMessages";
+import ChatInput from "../components/ChatInput";
  
 // I prompt dell'AI stanno sul server: src/lib/prompts.js (usati da /api/chat).
  
@@ -111,7 +112,6 @@ export default function LenIA() {
   // Attachments (tutte le tab chat) — file su Supabase Storage
 const [attachments, setAttachments] = useState([]); // array of { path, mediaType, name, preview, isPdf }
 const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef(null);
   const [isMobile, setIsMobile]   = useState(false);
   const isHoveringRef  = useRef(false);
   const cursorDotRef   = useRef(null);
@@ -343,33 +343,6 @@ const [uploading, setUploading] = useState(false);
     return "";
   };
  
-const handleFileSelect = async (e) => {
-  const files = Array.from(e.target.files || []);
-  e.target.value = "";
-  if (!files.length) return;
- 
-  const room = MAX_FILES_PER_MESSAGE - attachments.length;
-  if (room <= 0) { alert(`Massimo ${MAX_FILES_PER_MESSAGE} allegati per messaggio.`); return; }
-  if (files.length > room) alert(`Massimo ${MAX_FILES_PER_MESSAGE} allegati: aggiungo solo i primi ${room}.`);
-  const batch = files.slice(0, room);
- 
-  setUploading(true);
-  const results = await Promise.allSettled(batch.map(uploadAttachment));
-  const ok = results.filter(r => r.status === "fulfilled").map(r => r.value);
-  const failed = results
-    .map((r, i) => r.status === "rejected" ? `${batch[i].name}: ${r.reason?.message || "errore"}` : null)
-    .filter(Boolean);
-  if (ok.length) setAttachments(prev => [...prev, ...ok]);
-  if (failed.length) alert("Alcuni file non sono stati caricati:\n" + failed.join("\n"));
-  setUploading(false);
-};
- 
-const removeAttachment = (idx) => {
-  const att = attachments[idx];
-  setAttachments(p => p.filter((_, j) => j !== idx));
-  if (att?.path) deleteAttachment(att.path).catch(() => {});
-};
- 
   const sendMessage = async (retryHistory = null) => {
     const isRetry = retryHistory !== null;
     if (!isRetry && (!input.trim() && !attachments.length) || loading || uploading) return;
@@ -464,7 +437,6 @@ const removeAttachment = (idx) => {
     setTimeout(() => setBriefSaved(false), 2000);
   };
  
-  const handleKey = (e) => { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
   const clearChat = () => { setMessages([]); setHistory([]); setAnalyses({}); };
  
  
@@ -613,38 +585,9 @@ const removeAttachment = (idx) => {
             onRetry={sendMessage} onSave={saveToHistory} onAnalyze={analyzeCaption}
             onSetMode={setMode} onSetInput={setInput} onBoardDraft={setBoardDraft} hov={hov} />
  
-          <div style={{ ...S.inputArea, background:`${currentMode.color}10`, borderTop:`2px solid ${currentMode.color}33` }}>
-            {attachments.length > 0 && (
-              <div style={{ maxWidth:860, margin:"0 auto 10px", display:"flex", gap:8, flexWrap:"wrap" }}>
-                {attachments.map((att, ai) => (
-                  <div key={ai} style={{ display:"flex", alignItems:"center", gap:6, background:"var(--surface)", border:`1px solid ${currentMode.color}44`, borderRadius:10, padding:"6px 10px" }}>
-                    {att.preview
-                      ? <img src={att.preview} alt="preview" style={{ width:32, height:32, borderRadius:4, objectFit:"cover" }} />
-                      : <span style={{ fontSize:16 }}>📎</span>}
-                    <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:"var(--text2)", maxWidth:100, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{att.name}</span>
-                    <button onClick={()=>removeAttachment(ai)} style={{ background:"transparent", border:"none", color:"#ccc", fontSize:14, cursor:"pointer", padding:0 }}>✕</button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={S.inputWrapper}>
-              <>
-  <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple style={{ display:"none" }} onChange={handleFileSelect} />
-  <button className="clear-btn" disabled={uploading || attachments.length >= MAX_FILES_PER_MESSAGE} onClick={()=>fileInputRef.current?.click()} style={{ ...S.clearBtn, width:52, height:52, borderRadius:14, fontSize:20, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", padding:0, border:`1.5px solid ${currentMode.color}55`, color:currentMode.color, opacity:uploading?0.6:1 }} {...hov} title="Allega immagini o PDF">{uploading ? "…" : "+"}</button>
-</>
-              <textarea style={{ ...S.textarea, border:`1.5px solid ${currentMode.color}55`, boxShadow:`0 2px 12px ${currentMode.color}15` }} value={input} onChange={e=>setInput(e.target.value)} onKeyDown={handleKey}
-                placeholder={
-                  mode==="caption"    ? "es. foto del backstage dell'ultima performance, mood underground..." :
-                  mode==="hashtag"    ? "es. mostra collettiva di arte digitale e musica sperimentale" :
-                  mode==="reels"      ? "es. teaser del nuovo singolo, atmosfera notturna e misteriosa — dimmi di che video si tratta!" :
-                  mode==="brainstorm" ? "es. voglio rinnovare l'identita visiva del collettivo, da dove partiamo?" :
-                                        "Scrivi qui..."
-                }
-                rows={3} />
-              <button className="send-btn" onClick={()=>sendMessage()} disabled={(!input.trim()&&!attachments.length)||loading||uploading||!canWrite} title={!canWrite?"Il tuo ruolo è sola lettura":""} style={{ ...S.sendBtn, background:(!input.trim()&&!attachments.length)||loading||!canWrite?"#e8e4df":currentMode.color, color:(!input.trim()&&!attachments.length)||loading?"#bbb":"#fff" }} {...hov}>↑</button>
-            </div>
-            <p style={{ maxWidth:860, margin:"8px auto 0", fontFamily:"'DM Sans',sans-serif", fontSize:10, color:"#ccc", letterSpacing:"0.08em" }}>enter per inviare · shift+enter per andare a capo</p>
-          </div>
+          <ChatInput mode={mode} currentMode={currentMode} input={input} setInput={setInput}
+            attachments={attachments} setAttachments={setAttachments} uploading={uploading} setUploading={setUploading}
+            loading={loading} canWrite={canWrite} onSend={sendMessage} hov={hov} />
         </>
       )}
 
