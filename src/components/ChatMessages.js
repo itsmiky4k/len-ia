@@ -48,7 +48,7 @@ export default function ChatMessages({
       {messages.map((msg,i) => {
         const isUser = msg.role==="user";
         const analysis = analyses[i];
-        const isSaved = savedItems.find(x=>x.id===i);
+        const isSaved = savedItems.some(x=>x.content===msg.content);
         const msgMode = modes.find(m=>m.id===msg.mode);
         return (
           <div key={i} style={{ ...S.msgWrapper, animation:"slideUp 0.35s cubic-bezier(0.22,1,0.36,1)" }}>
